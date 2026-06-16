@@ -12,7 +12,7 @@ An edge-first AI knowledge workspace. Upload sources, build a local knowledge ba
     *   **Images**: Performs local OCR (using Tesseract) to ingest scanned text/screenshots.
     *   **Local Audio Files**: High-speed, offline transcription of `.mp3`, `.wav`, `.m4a`, `.flac`, and `.ogg` files.
     *   **YouTube Ingestion**: Fast subtitle-first parser that grabs transcriptions in under 5 seconds (with fallback to local audio models).
-    *   **Website Links**: Boilerplate-free scraping that strips headers, navbars, and script/style tags, leaving clean Markdown content.
+    *   **Website Links**: Full-page extraction powered by a headless Chromium browser (Playwright) that executes JavaScript before reading the page, combined with Mozilla's Readability algorithm (Firefox Reader Mode) to algorithmically strip all navbars, sidebars, footers, and ads — works on any website regardless of technology stack (static HTML, PHP, React, Vue, Next.js, etc.).
     *   **Copy Text Pasting**: Ingests custom typed or pasted notes, saving them directly to disk as raw text files.
 *   **Interactive 3x2 Notion-like Grid**: Beautiful frontend layout to upload and manage sources.
 *   **Sequential Extraction Pipeline**: Renders real-time, step-by-step progress timelines for all processing checkpoints.
@@ -66,7 +66,11 @@ Before running the project, ensure you have the following installed:
     ```bash
     pip install -r requirements.txt
     ```
-5.  Start the FastAPI server:
+5.  Install the Playwright headless browser (required for website ingestion):
+    ```bash
+    playwright install chromium
+    ```
+6.  Start the FastAPI server:
     ```bash
     uvicorn main:app --reload --port 8000
     ```

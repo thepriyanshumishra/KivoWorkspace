@@ -1,0 +1,133 @@
+# app/api/routes/workspaces.py
+# Purpose: APIRouter for workspace CRUD operations.
+# Responsibilities: Implements list, get, create, rename, delete workspaces on local disk.
+
+from fastapi import APIRouter, HTTPException, Path, Body
+import shutil
+import json
+import uuid
+import logging
+from datetime import datetime, timezone
+from typing import List
+
+from app.core.config import settings
+from app.models.workspace import Workspace, WorkspaceCreate, WorkspaceRename
+
+logger = logging.getLogger("kivo.workspaces")
+router = APIRouter()
+
+def get_workspace_dir(workspace_id: str):
+    return settings.workspaces_dir / workspace_id
+
+def get_metadata_path(workspace_id: str):
+    return get_workspace_dir(workspace_id) / "metadata.json"
+
+@router.get("", response_model=List[Workspace])
+def list_workspaces():
+    """List all available workspaces by reading workspace folders."""
+    workspaces = []
+    if not settings.workspaces_dir.exists():
+        return workspaces
+        
+    for item in settings.workspaces_dir.iterdir():
+        if item.is_dir():
+            metadata_file = item / "metadata.json"
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file, "r") as f:
+                        data = json.load(f)
+                    workspaces.append(Workspace(**data))
+                except Exception as e:
+                    logger.error(f"Failed to read workspace metadata in {item}: {e}")
+                    # Skip corrupt workspace directory
+                    pass
+                    
+    # Sort by created_at descending (newest first)
+    workspaces.sort(key=lambda x: x.created_at, reverse=True)
+    return workspaces
+
+@router.post("", response_model=Workspace)
+def create_workspace(payload: WorkspaceCreate):
+    """Create a new workspace directory and initialize its metadata.json."""
+    workspace_id = str(uuid.uuid4())
+    workspace_dir = get_workspace_dir(workspace_id)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    
+    # We use UTC timestamp with timezone formatting or naive UTC.
+    # ISO-8601 parsing handles it well.
+    metadata = Workspace(
+        id=workspace_id,
+        name=payload.name,
+        created_at=datetime.now(timezone.utc),
+        status="ready",
+        sources_count=0
+    )
+    
+    metadata_file = get_metadata_path(workspace_id)
+    try:
+        with open(metadata_file, "w") as f:
+            f.write(metadata.model_dump_json())
+    except Exception as e:
+        logger.error(f"Failed to write metadata for new workspace {workspace_id}: {e}")
+        # Clean up directory on failure
+        shutil.rmtree(workspace_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail="Failed to create workspace storage")
+        
+    logger.info(f"Workspace '{payload.name}' created with ID {workspace_id}")
+    return metadata
+
+@router.get("/{workspace_id}", response_model=Workspace)
+def get_workspace(workspace_id: str = Path(..., description="The unique workspace ID")):
+    """Get metadata details of a specific workspace."""
+    metadata_file = get_metadata_path(workspace_id)
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    try:
+        with open(metadata_file, "r") as f:
+            data = json.load(f)
+        return Workspace(**data)
+    except Exception as e:
+        logger.error(f"Failed to load workspace metadata for {workspace_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to read workspace metadata")
+
+@router.put("/{workspace_id}", response_model=Workspace)
+def rename_workspace(
+    workspace_id: str = Path(..., description="The unique workspace ID"),
+    payload: WorkspaceRename = Body(...)
+):
+    """Rename an existing workspace by updating its metadata.json."""
+    metadata_file = get_metadata_path(workspace_id)
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    try:
+        with open(metadata_file, "r") as f:
+            data = json.load(f)
+        
+        workspace = Workspace(**data)
+        workspace.name = payload.name
+        
+        with open(metadata_file, "w") as f:
+            f.write(workspace.model_dump_json())
+            
+        logger.info(f"Workspace {workspace_id} renamed to '{payload.name}'")
+        return workspace
+    except Exception as e:
+        logger.error(f"Failed to rename workspace {workspace_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update workspace metadata")
+
+@router.delete("/{workspace_id}")
+def delete_workspace(workspace_id: str = Path(..., description="The unique workspace ID")):
+    """Delete a workspace and all of its associated files."""
+    workspace_dir = get_workspace_dir(workspace_id)
+    if not workspace_dir.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    try:
+        shutil.rmtree(workspace_dir)
+        logger.info(f"Workspace {workspace_id} deleted successfully.")
+        return {"status": "ok", "message": f"Workspace {workspace_id} deleted successfully"}
+    except Exception as e:
+        logger.error(f"Failed to delete workspace directory {workspace_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete workspace storage")

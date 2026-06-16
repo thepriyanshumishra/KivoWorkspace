@@ -13,4 +13,5 @@ faster-whisper
 yt-dlp
 requests>=2.31.0
 beautifulsoup4>=4.12.3
-html2text>=2024.2.26
+playwright>=1.44.0
+readability-lxml>=0.8.1

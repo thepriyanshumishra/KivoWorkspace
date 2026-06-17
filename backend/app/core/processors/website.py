@@ -212,9 +212,7 @@ class WebsiteProcessor:
             parent_texts, child_boundaries = find_parent_child_boundaries(
                 final_text,
                 parent_size=self.chunk_size,
-                parent_overlap=self.chunk_overlap,
-                child_size=250,
-                child_overlap=50
+                parent_overlap=self.chunk_overlap
             )
             for start_idx, end_idx, parent_idx in child_boundaries:
                 chunk_text = final_text[start_idx:end_idx].strip()

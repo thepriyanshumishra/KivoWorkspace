@@ -132,7 +132,7 @@ def find_chunk_boundaries(text: str, chunk_size: int = 1000, chunk_overlap: int 
         
     return chunks
 
-def find_parent_child_boundaries(text: str, parent_size: int = 1000, parent_overlap: int = 200, child_size: int = 250, child_overlap: int = 50) -> tuple:
+def find_parent_child_boundaries(text: str, parent_size: int = 1000, parent_overlap: int = 200, child_size: int = 750, child_overlap: int = 150) -> tuple:
     """
     Finds boundary-aware parent and child chunk boundaries.
     Returns:
@@ -158,7 +158,7 @@ def find_parent_child_boundaries(text: str, parent_size: int = 1000, parent_over
 
 
 class TextProcessor:
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200, child_size: int = 250, child_overlap: int = 50):
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200, child_size: int = 750, child_overlap: int = 150):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.child_size = child_size

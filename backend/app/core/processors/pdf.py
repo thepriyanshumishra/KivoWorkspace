@@ -57,9 +57,7 @@ class PDFProcessor:
             page_parents, page_children_boundaries = find_parent_child_boundaries(
                 page_text,
                 parent_size=self.chunk_size,
-                parent_overlap=self.chunk_overlap,
-                child_size=250,
-                child_overlap=50
+                parent_overlap=self.chunk_overlap
             )
             
             parent_texts.extend(page_parents)

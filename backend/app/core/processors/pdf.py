@@ -75,20 +75,9 @@ class PDFProcessor:
                     })
                     child_idx += 1
                 
-        # 3. Save chunks and parent chunks
-        workspace_dir = file_path.parent.parent
-        
-        parent_chunks_dir = workspace_dir / "parent_chunks"
-        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
-        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
-        with open(parent_chunks_file, "w") as f:
-            json.dump(parent_texts, f, indent=2)
-            
-        chunks_dir = workspace_dir / "chunks"
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-        chunks_file = chunks_dir / f"{source_id}.json"
-        with open(chunks_file, "w") as f:
-            json.dump(child_chunks, f, indent=2)
+        # Save chunks to SQLite database
+        from app.core.database import save_chunks_to_db
+        save_chunks_to_db(workspace_id, source_id, parent_texts, child_chunks)
             
         # 4. Generate summary preview (first 300 characters of the document)
         preview_text = ""

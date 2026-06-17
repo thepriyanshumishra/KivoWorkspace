@@ -345,7 +345,8 @@ def run_benchmark():
         ndcg_sum += ndcg_val
         
         # Correctness evaluation
-        eval_res = evaluate_generation_correctness(question, q_item["expected_answer"], answer)
+        plain_answer = res.get("plain_answer", answer)
+        eval_res = evaluate_generation_correctness(question, q_item["expected_answer"], plain_answer)
         classification = eval_res["classification"]
         eval_reason = eval_res["reason"]
         

@@ -58,11 +58,10 @@ class EmbeddingProcessor:
 
     def process(self, workspace_id: str, source_id: str) -> Dict[str, Any]:
         """
-        Loads the chunks JSON for the given source, computes embeddings for
+        Loads the chunks from SQLite for the given source, computes embeddings for
         all chunks, and saves them to a NumPy binary file for cached storage.
         """
         workspace_dir = settings.workspaces_dir / workspace_id
-        chunks_file = workspace_dir / "chunks" / f"{source_id}.json"
         
         # Ensure directories exist
         embeddings_dir = workspace_dir / "embeddings"
@@ -81,21 +80,16 @@ class EmbeddingProcessor:
                 "cached": True
             }
 
-        if not chunks_file.exists():
-            logger.warning(f"No chunks file found at {chunks_file}. Skipping embeddings.")
-            return {
-                "source_id": source_id,
-                "chunks_count": 0,
-                "embedding_dim": 0,
-                "cached": False
-            }
-
-        # Load text chunks
-        with open(chunks_file, "r", encoding="utf-8") as f:
-            chunks = json.load(f)
+        # Load text chunks from SQLite database
+        from app.core.database import get_child_chunks
+        try:
+            chunks = get_child_chunks(workspace_id, source_id)
+        except Exception as e:
+            logger.error(f"Failed to load child chunks from SQLite for source {source_id}: {e}")
+            chunks = []
 
         if not chunks:
-            logger.info(f"Chunks file at {chunks_file} is empty. Skipping embeddings.")
+            logger.info(f"No chunks found for source {source_id}. Skipping embeddings.")
             return {
                 "source_id": source_id,
                 "chunks_count": 0,

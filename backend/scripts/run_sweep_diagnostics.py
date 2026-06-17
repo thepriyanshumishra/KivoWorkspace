@@ -117,9 +117,6 @@ def run_diagnostics():
         index_file = workspace_dir / "index.faiss"
         index = faiss.read_index(str(index_file))
         
-        with open(workspace_dir / "chunk_map.json", "r", encoding="utf-8") as f:
-            chunk_map = json.load(f)
-            
         model = get_embedding_model()
         
         hits_1 = 0
@@ -136,7 +133,6 @@ def run_diagnostics():
         assembled_context_tokens_list = []
         parent_truncation_occurred = 0
         
-        parent_cache = {}
         max_parent_tokens = 3500
         
         # Run retrieval-only for all 60 questions (instant)
@@ -155,56 +151,54 @@ def run_diagnostics():
             faiss.normalize_L2(query_contiguous.reshape(1, -1))
             scores, indices = index.search(query_contiguous.reshape(1, -1), k)
             
+            valid_indices = [int(idx) for idx in indices[0] if idx >= 0]
+            
+            # Load matching child chunks from SQLite
+            from app.core.database import get_child_chunks_by_global_indices, get_parent_chunks_by_ids
+            db_chunks = get_child_chunks_by_global_indices(workspace_id, valid_indices)
+            chunks_by_global_idx = {c["global_vector_index"]: c for c in db_chunks}
+            
             retrieved_child_chunks = []
             parent_keys_seen = set()
             parent_records = []
             
             for rank, (score, chunk_idx) in enumerate(zip(scores[0], indices[0]), 1):
-                if chunk_idx >= 0 and chunk_idx < len(chunk_map):
-                    c_chunk = chunk_map[chunk_idx]
-                    c_text = c_chunk["text"]
-                    p_id = c_chunk["metadata"].get("parent_id")
+                chunk_idx_int = int(chunk_idx)
+                if chunk_idx_int in chunks_by_global_idx:
+                    c_chunk = chunks_by_global_idx[chunk_idx_int]
+                    parent_id = c_chunk["parent_id"]
                     
                     retrieved_child_chunks.append({
                         "rank": rank,
                         "score": float(score),
-                        "text": c_text,
-                        "parent_id": p_id
+                        "text": c_chunk["text"],
+                        "parent_id": parent_id
                     })
                     
-                    if p_id is not None:
-                        p_key = (source_id, p_id)
-                        if p_key not in parent_keys_seen:
-                            parent_keys_seen.add(p_key)
+                    if parent_id is not None:
+                        if parent_id not in parent_keys_seen:
+                            parent_keys_seen.add(parent_id)
                             parent_records.append({
                                 "score": float(score),
-                                "source_id": source_id,
-                                "parent_id": p_id
+                                "parent_id": parent_id
                             })
                             
             # Sort parents
             parent_records.sort(key=lambda x: x["score"], reverse=True)
             
             # Parent context reconstruction audit
+            parent_ids = [r["parent_id"] for r in parent_records if r["parent_id"] is not None]
+            db_parents = get_parent_chunks_by_ids(workspace_id, parent_ids)
+            parents_by_id = {p["id"]: p["text"] for p in db_parents}
+            
             context_parts = []
             current_tokens = 0
             parent_chunks_used = 0
             
             for p_rec in parent_records:
-                src_id = p_rec["source_id"]
                 p_id = p_rec["parent_id"]
-                
-                if src_id not in parent_cache:
-                    p_file = workspace_dir / "parent_chunks" / f"{src_id}.json"
-                    if p_file.exists():
-                        with open(p_file, "r", encoding="utf-8") as f:
-                            parent_cache[src_id] = json.load(f)
-                    else:
-                        parent_cache[src_id] = []
-                        
-                src_parents = parent_cache[src_id]
-                if p_id >= 0 and p_id < len(src_parents):
-                    p_text = src_parents[p_id]
+                if p_id in parents_by_id:
+                    p_text = parents_by_id[p_id]
                     p_tokens = estimate_tokens(p_text)
                     
                     if current_tokens + p_tokens > max_parent_tokens:
@@ -316,7 +310,8 @@ def run_diagnostics():
             if is_ref:
                 ref_count += 1
                 
-            eval_res = evaluate_generation_correctness(q_text, q_item["expected_answer"], ans)
+            plain_ans = res.get("plain_answer", ans)
+            eval_res = evaluate_generation_correctness(q_text, q_item["expected_answer"], plain_ans)
             classification = eval_res["classification"]
             eval_reason = eval_res["reason"]
             

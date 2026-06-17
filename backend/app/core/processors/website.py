@@ -227,20 +227,9 @@ class WebsiteProcessor:
                     })
                     child_idx += 1
 
-        # ── Step 5: Persist chunks to disk ────────────────────────────────────
-        workspace_dir = settings.workspaces_dir / workspace_id
-        
-        parent_chunks_dir = workspace_dir / "parent_chunks"
-        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
-        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
-        with open(parent_chunks_file, "w", encoding="utf-8") as f:
-            json.dump(parent_texts, f, indent=2)
-            
-        chunks_dir = workspace_dir / "chunks"
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-        chunks_file = chunks_dir / f"{source_id}.json"
-        with open(chunks_file, "w", encoding="utf-8") as f:
-            json.dump(child_chunks, f, indent=2)
+        # ── Step 5: Save chunks to SQLite database ─────────────────────────────
+        from app.core.database import save_chunks_to_db
+        save_chunks_to_db(workspace_id, source_id, parent_texts, child_chunks)
 
         summary = final_text[:300].strip() + ("..." if len(final_text) > 300 else "")
         total_words = len(final_text.split())

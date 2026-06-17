@@ -315,6 +315,13 @@ def delete_source(
             except Exception as e:
                 logger.error(f"Failed to delete source file {file_path}: {e}")
                 
+    # Delete chunks from SQLite database
+    from app.core.database import delete_source_chunks
+    try:
+        delete_source_chunks(workspace_id, source_id)
+    except Exception as e:
+        logger.error(f"Failed to delete SQLite chunks for source {source_id}: {e}")
+                
     # Update list & save
     current_sources.remove(source_to_delete)
     save_sources(workspace_id, current_sources)

@@ -53,6 +53,63 @@ Question:
 
 Answer:"""
 
+def sanitize_response(answer: str, source_id_to_name: Dict[str, str] = None) -> Tuple[str, List[Dict[str, Any]], str]:
+    """
+    Removes XML tags, maps raw citations like [source_id_p0] to sequential footnotes like [1], [2],
+    and returns the clean answer with footnotes, the citations metadata, and a completely plain text answer (no citations).
+    """
+    import re
+    
+    # 1. Remove XML tags like <chunk ...> and </chunk>
+    answer_clean = re.sub(r'</?chunk[^>]*>', '', answer)
+    
+    # Find all raw citation tags like [uuid_p0] or [uuid_c0]
+    raw_citations = re.findall(r'\[([a-zA-Z0-9_-]+_[pc]\d+)\]', answer_clean)
+    
+    unique_citations = []
+    for cit in raw_citations:
+        if cit not in unique_citations:
+            unique_citations.append(cit)
+            
+    citations_meta = []
+    answer_footnoted = answer_clean
+    answer_plain = answer_clean
+    
+    for i, cit in enumerate(unique_citations, 1):
+        # Extract source_id from composite citation id: source_id_pX or source_id_cX
+        source_id = None
+        if "_p" in cit:
+            source_id = cit.split("_p")[0]
+        elif "_c" in cit:
+            source_id = cit.split("_c")[0]
+            
+        source_name = "Source Document"
+        if source_id and source_id_to_name and source_id in source_id_to_name:
+            source_name = source_id_to_name[source_id]
+            
+        citations_meta.append({
+            "index": i,
+            "raw_id": cit,
+            "source_id": source_id,
+            "source_name": source_name
+        })
+        
+        # Replace raw citation with sequential footnote
+        answer_footnoted = answer_footnoted.replace(f"[{cit}]", f"[{i}]")
+        # Strip raw citation completely for plain text version
+        answer_plain = answer_plain.replace(f"[{cit}]", "")
+        
+    # Clean up excessive spacing
+    answer_footnoted = re.sub(r' +', ' ', answer_footnoted).strip()
+    answer_plain = re.sub(r' +', ' ', answer_plain).strip()
+    
+    # Clean up spaces before punctuation (e.g. "word ." -> "word.")
+    for char in ['.', ',', ';', '?', '!']:
+        answer_footnoted = answer_footnoted.replace(f" {char}", char)
+        answer_plain = answer_plain.replace(f" {char}", char)
+        
+    return answer_footnoted, citations_meta, answer_plain
+
 def retrieve_and_generate(
     workspace_id: str,
     question: str,
@@ -60,23 +117,25 @@ def retrieve_and_generate(
     max_parent_tokens: int = 3500
 ) -> Dict[str, Any]:
     """
-    Executes the Sprint 11 RAG Pipeline:
+    Executes the Sprint 12 SQLite-based RAG Pipeline:
     1. Dynamic Intent Routing: Detect standard QA vs Meta-Retrieval.
-    2. Vector Search: Retrieve child chunks from FAISS index.
-    3. Parent Reconstruction & Budgeting: Map child chunks to parents, deduplicate,
-       and reconstruct parent context up to max_parent_tokens.
+    2. Vector Search & DB Lookup: Retrieve child chunks from FAISS index and fetch texts from SQLite.
+    3. Parent Reconstruction & Budgeting: Map child chunks to parents via SQLite batch queries,
+       deduplicate, and reconstruct parent context up to max_parent_tokens.
     4. Model Generation: Query Ollama with intent-specific prompts.
+    5. Claim Sanitization: Strip XML tags, map citation markers sequentially, and construct metadata.
     """
     t_start = time.time()
     workspace_dir = settings.workspaces_dir / workspace_id
     index_file = workspace_dir / "index.faiss"
-    chunk_map_file = workspace_dir / "chunk_map.json"
 
-    if not index_file.exists() or not chunk_map_file.exists():
-        logger.warning(f"Workspace {workspace_id} index or chunk map not built.")
+    if not index_file.exists():
+        logger.warning(f"Workspace {workspace_id} FAISS index not built.")
         return {
             "question": question,
             "answer": "Error: Knowledge base index is not compiled. Please process your sources first.",
+            "plain_answer": "Error: Knowledge base index is not compiled.",
+            "citations": [],
             "child_ids": [],
             "parent_ids": [],
             "retrieved_child_chunks": [],
@@ -96,10 +155,8 @@ def retrieve_and_generate(
 
     logger.info(f"Question routed to {routing_mode} (Top-K={k})")
 
-    # Load FAISS index and chunk map
+    # Load FAISS index
     index = faiss.read_index(str(index_file))
-    with open(chunk_map_file, "r", encoding="utf-8") as f:
-        chunk_map = json.load(f)
 
     # 2. Vector Search (Child Chunks)
     model = get_embedding_model()
@@ -109,81 +166,71 @@ def retrieve_and_generate(
 
     scores, indices = index.search(query_contiguous.reshape(1, -1), k)
 
+    valid_indices = [int(idx) for idx in indices[0] if idx >= 0]
+
+    # Load matching child chunks from SQLite
+    from app.core.database import get_child_chunks_by_global_indices, get_parent_chunks_by_ids
+    db_chunks = get_child_chunks_by_global_indices(workspace_id, valid_indices)
+    chunks_by_global_idx = {c["global_vector_index"]: c for c in db_chunks}
+
     # Collect unique parent chunks sorted by similarity
     retrieved_child_chunks = []
     parent_keys_seen = set()
-    parent_records = []  # List of {"score": float, "source_id": str, "parent_id": int}
-
-    # Cache loaded parent json files to avoid re-reading disk
-    parent_cache = {}
+    parent_records = []  # List of {"score": float, "parent_id": str}
 
     for rank, (score, chunk_idx) in enumerate(zip(scores[0], indices[0]), 1):
-        if chunk_idx >= 0 and chunk_idx < len(chunk_map):
-            c_chunk = chunk_map[chunk_idx]
+        chunk_idx_int = int(chunk_idx)
+        if chunk_idx_int in chunks_by_global_idx:
+            c_chunk = chunks_by_global_idx[chunk_idx_int]
             source_id = c_chunk["source_id"]
-            p_id = c_chunk["metadata"].get("parent_id")
+            parent_id = c_chunk["parent_id"]
             
             c_record = {
                 "rank": rank,
                 "score": float(score),
-                "id": f"{source_id}_c{c_chunk['chunk_index']}",
+                "id": c_chunk["id"],
                 "text": c_chunk["text"],
-                "parent_id": f"{source_id}_p{p_id}" if p_id is not None else None
+                "parent_id": parent_id
             }
             retrieved_child_chunks.append(c_record)
 
-            if p_id is not None:
-                p_key = (source_id, p_id)
-                if p_key not in parent_keys_seen:
-                    parent_keys_seen.add(p_key)
+            if parent_id is not None:
+                if parent_id not in parent_keys_seen:
+                    parent_keys_seen.add(parent_id)
                     parent_records.append({
                         "score": float(score),
-                        "source_id": source_id,
-                        "parent_id": p_id
+                        "parent_id": parent_id
                     })
 
     # Sort parent records in descending order of child chunk similarity score
     parent_records.sort(key=lambda x: x["score"], reverse=True)
 
     # 3. Load Parents and enforce budget
+    parent_ids = [r["parent_id"] for r in parent_records if r["parent_id"] is not None]
+    db_parents = get_parent_chunks_by_ids(workspace_id, parent_ids)
+    parents_by_id = {p["id"]: p["text"] for p in db_parents}
+
     context_parts = []
     retrieved_parent_chunks = []
     current_tokens = 0
     parent_ids_used = []
 
     for p_rec in parent_records:
-        src_id = p_rec["source_id"]
         p_id = p_rec["parent_id"]
-
-        # Load parent texts for this source
-        if src_id not in parent_cache:
-            p_file = workspace_dir / "parent_chunks" / f"{src_id}.json"
-            if p_file.exists():
-                try:
-                    with open(p_file, "r", encoding="utf-8") as f:
-                        parent_cache[src_id] = json.load(f)
-                except Exception as e:
-                    logger.error(f"Failed to load parent chunks for source {src_id}: {e}")
-                    parent_cache[src_id] = []
-            else:
-                parent_cache[src_id] = []
-
-        src_parents = parent_cache[src_id]
-        if p_id >= 0 and p_id < len(src_parents):
-            p_text = src_parents[p_id]
+        if p_id in parents_by_id:
+            p_text = parents_by_id[p_id]
             p_tokens = estimate_tokens(p_text)
             
             # Check context budget
             if current_tokens + p_tokens > max_parent_tokens:
-                logger.info(f"Parent chunk {src_id}_p{p_id} ({p_tokens} tokens) excluded. Adding it would exceed budget ({current_tokens + p_tokens} > {max_parent_tokens}).")
+                logger.info(f"Parent chunk {p_id} ({p_tokens} tokens) excluded. Adding it would exceed budget ({current_tokens + p_tokens} > {max_parent_tokens}).")
                 continue
 
             current_tokens += p_tokens
-            parent_id = f"{src_id}_p{p_id}"
-            context_parts.append(f'<chunk id="{parent_id}">\n{p_text}\n</chunk>')
-            parent_ids_used.append(parent_id)
+            context_parts.append(f'<chunk id="{p_id}">\n{p_text}\n</chunk>')
+            parent_ids_used.append(p_id)
             retrieved_parent_chunks.append({
-                "id": parent_id,
+                "id": p_id,
                 "text": p_text,
                 "score": p_rec["score"]
             })
@@ -202,22 +249,35 @@ def retrieve_and_generate(
         }
     }
 
-    answer = ""
+    raw_answer = ""
     try:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
             result = response.json()
-            answer = result.get("response", "").strip()
+            raw_answer = result.get("response", "").strip()
         else:
-            answer = f"Error: Ollama returned status code {response.status_code}"
+            raw_answer = f"Error: Ollama returned status code {response.status_code}"
     except Exception as e:
-        answer = f"Error calling Ollama API: {e}"
+        raw_answer = f"Error calling Ollama API: {e}"
+
+    # Load sources to get source names for citation metadata
+    from app.api.routes.sources import load_sources
+    try:
+        sources = load_sources(workspace_id)
+        source_id_to_name = {s.id: s.name for s in sources}
+    except Exception:
+        source_id_to_name = {}
+
+    # 5. Claim Sanitization
+    answer_footnoted, citations_meta, answer_plain = sanitize_response(raw_answer, source_id_to_name)
 
     latency_ms = int((time.time() - t_start) * 1000)
 
     return {
         "question": question,
-        "answer": answer,
+        "answer": answer_footnoted,
+        "plain_answer": answer_plain,
+        "citations": citations_meta,
         "child_ids": [c["id"] for c in retrieved_child_chunks],
         "parent_ids": parent_ids_used,
         "retrieved_child_chunks": retrieved_child_chunks,

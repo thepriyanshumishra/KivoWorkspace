@@ -38,7 +38,11 @@ class VectorDBProcessor:
             return {"vectors_indexed": 0, "dimension": self.dimension}
 
         all_vectors = []
-        chunk_map = []
+        mappings = []
+        global_idx = 0
+
+        # Import database helpers
+        from app.core.database import get_child_chunks, update_global_vector_indices
 
         for src in sources:
             # We only index sources that are ready/processed or currently being finalized
@@ -47,19 +51,17 @@ class VectorDBProcessor:
                 continue
 
             npy_file = workspace_dir / "embeddings" / f"{src.id}.npy"
-            chunks_file = workspace_dir / "chunks" / f"{src.id}.json"
 
-            if not npy_file.exists() or not chunks_file.exists():
-                logger.warning(f"Missing embeddings or chunks for source {src.id}. Skipping.")
+            if not npy_file.exists():
+                logger.warning(f"Missing embeddings for source {src.id}. Skipping.")
                 continue
 
             try:
                 # Load numpy vectors (shape: [num_chunks, 768])
                 vectors = np.load(npy_file)
                 
-                # Load corresponding chunk texts
-                with open(chunks_file, "r", encoding="utf-8") as f:
-                    chunks = json.load(f)
+                # Load corresponding chunk texts from SQLite
+                chunks = get_child_chunks(workspace_id, src.id)
 
                 if len(vectors) != len(chunks):
                     logger.error(
@@ -75,14 +77,10 @@ class VectorDBProcessor:
 
                 all_vectors.append(vectors_contiguous)
 
-                for idx, chunk in enumerate(chunks):
-                    chunk_map.append({
-                        "source_id": src.id,
-                        "source_name": src.name,
-                        "chunk_index": chunk["index"],
-                        "text": chunk["text"],
-                        "metadata": chunk.get("metadata", {})
-                    })
+                for chunk in chunks:
+                    c_id = f"{src.id}_c{chunk['index']}"
+                    mappings.append((c_id, global_idx))
+                    global_idx += 1
 
             except Exception as e:
                 logger.error(f"Failed to load/process vectors for source {src.id}: {e}")
@@ -91,7 +89,7 @@ class VectorDBProcessor:
         if not all_vectors:
             logger.warning("No vectors found to build FAISS index.")
             # Save empty files to avoid breaking retrieval
-            self._save_empty_index(workspace_dir)
+            self._save_empty_index(workspace_id, workspace_dir)
             return {"vectors_indexed": 0, "dimension": self.dimension}
 
         # Concatenate all lists of vectors
@@ -107,10 +105,8 @@ class VectorDBProcessor:
         index_file = workspace_dir / "index.faiss"
         faiss.write_index(index, str(index_file))
 
-        # Write chunk mapping JSON file to disk
-        chunk_map_file = workspace_dir / "chunk_map.json"
-        with open(chunk_map_file, "w", encoding="utf-8") as f:
-            json.dump(chunk_map, f, indent=2)
+        # Write chunk mapping to SQLite database
+        update_global_vector_indices(workspace_id, mappings)
 
         logger.info(
             f"FAISS index built and saved successfully. "
@@ -122,9 +118,9 @@ class VectorDBProcessor:
             "dimension": self.dimension
         }
 
-    def _save_empty_index(self, workspace_dir: Path):
+    def _save_empty_index(self, workspace_id: str, workspace_dir: Path):
         """Helper to create empty placeholder vector DB files."""
         index = faiss.IndexFlatIP(self.dimension)
         faiss.write_index(index, str(workspace_dir / "index.faiss"))
-        with open(workspace_dir / "chunk_map.json", "w", encoding="utf-8") as f:
-            json.dump([], f)
+        from app.core.database import update_global_vector_indices
+        update_global_vector_indices(workspace_id, [])

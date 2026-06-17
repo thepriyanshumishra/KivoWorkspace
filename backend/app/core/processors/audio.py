@@ -21,10 +21,10 @@ class AudioProcessor:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
-    def create_chunks_from_segments(self, segments: List[Any], duration: float, chunks_dir: Path, source_id: str) -> Dict[str, Any]:
+    def create_chunks_from_segments(self, segments: List[Any], duration: float, workspace_id: str, source_id: str) -> Dict[str, Any]:
         """
         Takes raw segments (dicts or objects), maps character ranges to timestamps,
-        generates overlapping chunks, saves the chunks file to disk, and returns stats.
+        generates overlapping chunks, saves the chunks to SQLite, and returns stats.
         """
         # 1. Convert segments to uniform dictionaries: {"text": str, "start": float, "end": float}
         uniform_segments = []
@@ -118,17 +118,9 @@ class AudioProcessor:
                     })
                     child_idx += 1
                     
-        # 4. Save chunks and parent chunks
-        parent_chunks_dir = chunks_dir.parent / "parent_chunks"
-        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
-        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
-        with open(parent_chunks_file, "w") as f:
-            json.dump(parent_texts, f, indent=2)
-            
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-        chunks_file = chunks_dir / f"{source_id}.json"
-        with open(chunks_file, "w") as f:
-            json.dump(child_chunks, f, indent=2)
+        # 4. Save chunks to SQLite database
+        from app.core.database import save_chunks_to_db
+        save_chunks_to_db(workspace_id, source_id, parent_texts, child_chunks)
             
         # 5. Generate summary preview (first 300 characters of the document)
         summary = clean_text[:300].strip() + ("..." if total_chars > 300 else "")
@@ -175,5 +167,4 @@ class AudioProcessor:
             raise RuntimeError(f"Transcription failed: {e}")
             
         # 2. Map and chunk via helper
-        chunks_dir = file_path.parent.parent / "chunks"
-        return self.create_chunks_from_segments(segments, duration, chunks_dir, source_id)
+        return self.create_chunks_from_segments(segments, duration, workspace_id, source_id)

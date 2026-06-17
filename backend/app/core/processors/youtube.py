@@ -141,9 +141,7 @@ class YouTubeProcessor:
             
         # If subtitles were found and parsed, chunk directly and return
         if subs_downloaded and segments:
-            logger.info("Ingesting subtitles directly, skipping audio download and local ASR.")
-            chunks_dir = sources_dir.parent / "chunks"
-            res = self.audio_processor.create_chunks_from_segments(segments, duration, chunks_dir, source_id)
+            res = self.audio_processor.create_chunks_from_segments(segments, duration, workspace_id, source_id)
             return {
                 "title": video_title,
                 "stats": res["stats"],

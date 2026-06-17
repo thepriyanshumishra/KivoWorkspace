@@ -483,7 +483,7 @@ class ProcessingScreen extends ConsumerWidget {
                                   if (rightStepStatus == 'done' || rightStepStatus == 'active') {
                                     lineColor = colors.primary;
                                   } else {
-                                    lineColor = colors.primary.withOpacity(0.4);
+                                    lineColor = colors.primary.withValues(alpha: 0.4);
                                   }
                                 }
 
@@ -539,7 +539,7 @@ class ProcessingScreen extends ConsumerWidget {
                                           boxShadow: stepStatus == 'active'
                                               ? [
                                                   BoxShadow(
-                                                    color: colors.primary.withOpacity(0.3),
+                                                    color: colors.primary.withValues(alpha: 0.3),
                                                     blurRadius: 8,
                                                     spreadRadius: 2,
                                                   )

@@ -27,21 +27,45 @@ class PDFProcessor:
         if not file_path.exists():
             raise FileNotFoundError(f"PDF file not found at {file_path}")
             
-        doc = fitz.open(file_path)
-        page_count = len(doc)
+        try:
+            doc = fitz.open(file_path)
+            page_count = len(doc)
+        except Exception as e:
+            logger.error(f"PyMuPDF failed to open PDF {file_path}: {e}")
+            raise ValueError(f"Failed to open PDF file. The file may be corrupted or encrypted. Details: {e}")
+            
         total_words = 0
         total_chars = 0
         
         # 1. Extract text page by page
         pages_text = []
-        for page_num in range(page_count):
-            page = doc[page_num]
-            text = page.get_text("text")  # Extract clean layout text
-            pages_text.append(text)
+        try:
+            for page_num in range(page_count):
+                page = doc[page_num]
+                text = page.get_text("text")  # Extract clean layout text
+                pages_text.append(text)
+                
+                # Update stats
+                total_words += len(text.split())
+                total_chars += len(text)
+        except Exception as e:
+            doc.close()
+            logger.error(f"Failed to extract text from PDF {file_path}: {e}")
+            raise ValueError(f"Failed to read text pages from PDF. Details: {e}")
             
-            # Update stats
-            total_words += len(text.split())
-            total_chars += len(text)
+        # Check if any text was extracted
+        if total_chars == 0:
+            doc.close()
+            logger.warning(f"PDF file {file_path} contains no readable text (could be scanned document or empty).")
+            # Return empty stats instead of crashing
+            return {
+                "stats": {
+                    "pages": page_count,
+                    "words": 0,
+                    "chunks": 0
+                },
+                "summary": "This document contains no readable text. (If it is a scanned document, please upload it as an Image source for OCR)."
+            }
             
         # 2. Chunk text page-by-page to preserve precise page boundaries for citations
         child_chunks = []
@@ -77,7 +101,12 @@ class PDFProcessor:
                 
         # Save chunks to SQLite database
         from app.core.database import save_chunks_to_db
-        save_chunks_to_db(workspace_id, source_id, parent_texts, child_chunks)
+        try:
+            save_chunks_to_db(workspace_id, source_id, parent_texts, child_chunks)
+        except Exception as e:
+            doc.close()
+            logger.error(f"Failed to save PDF chunks to database: {e}")
+            raise RuntimeError(f"Database error while saving PDF chunks: {e}")
             
         # 4. Generate summary preview (first 300 characters of the document)
         preview_text = ""

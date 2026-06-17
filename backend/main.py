@@ -6,6 +6,8 @@
 #                   ensures storage directories exist on startup.
 
 import os
+import shutil
+import requests
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -29,6 +31,47 @@ logging.basicConfig(
 logger = logging.getLogger("kivo")
 
 
+def run_diagnostics():
+    """Runs non-blocking startup sanity checks for dependencies."""
+    logger.info("--- Starting Kivo Diagnostics ---")
+    
+    # 1. Check FFmpeg
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        logger.info(f"[DIAGNOSTIC] FFmpeg binary found: {ffmpeg_path}")
+    else:
+        logger.warning("[DIAGNOSTIC WARNING] FFmpeg was NOT found on system PATH. Audio transcription and YouTube processing will fail. Please install ffmpeg.")
+
+    # 2. Check Tesseract
+    tesseract_path = shutil.which("tesseract")
+    if tesseract_path:
+        logger.info(f"[DIAGNOSTIC] Tesseract OCR binary found: {tesseract_path}")
+    else:
+        logger.warning("[DIAGNOSTIC WARNING] Tesseract was NOT found on system PATH. Image OCR processing will fail. Please install tesseract-ocr.")
+
+    # 3. Check Ollama
+    try:
+        ollama_url = f"{settings.ollama_base_url}/api/tags"
+        response = requests.get(ollama_url, timeout=3)
+        if response.status_code == 200:
+            models_data = response.json()
+            models_list = [m.get("name") for m in models_data.get("models", [])]
+            logger.info(f"[DIAGNOSTIC] Ollama service is active. Available models: {models_list}")
+            
+            # Check default model
+            default_model = settings.ollama_default_model
+            if default_model in models_list or any(default_model in m for m in models_list):
+                logger.info(f"[DIAGNOSTIC] Default LLM model '{default_model}' is available in Ollama.")
+            else:
+                logger.warning(f"[DIAGNOSTIC WARNING] Default LLM model '{default_model}' is NOT pulled in Ollama. Please run: ollama pull {default_model}")
+        else:
+            logger.warning(f"[DIAGNOSTIC WARNING] Ollama service returned status code {response.status_code}.")
+    except Exception as e:
+        logger.warning(f"[DIAGNOSTIC WARNING] Could not connect to Ollama service at {settings.ollama_base_url}. Is Ollama running? Error: {e}")
+        
+    logger.info("--- Diagnostics Completed ---")
+
+
 # --- Startup / Shutdown Lifecycle ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,6 +83,10 @@ async def lifespan(app: FastAPI):
     settings.storage_dir.mkdir(parents=True, exist_ok=True)
     settings.workspaces_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Storage directories verified.")
+    
+    # Run startup diagnostic checks
+    run_diagnostics()
+    
     logger.info(f"Kivo Workspace API v{settings.app_version} started.")
     logger.info(f"Ollama target: {settings.ollama_base_url}")
     logger.info(f"Default model: {settings.ollama_default_model}")

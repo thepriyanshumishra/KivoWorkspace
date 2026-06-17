@@ -161,7 +161,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.forum_outlined, size: 64, color: colors.primary.withOpacity(0.5)),
+            Icon(Icons.forum_outlined, size: 64, color: colors.primary.withValues(alpha: 0.5)),
             const SizedBox(height: 24),
             Text(
               'What would you like to explore?',

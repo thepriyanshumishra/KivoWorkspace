@@ -89,6 +89,9 @@ def sanitize_response(answer: str, source_id_to_name: Dict[str, str] = None) -> 
     Removes XML tags, maps raw citations like [source_id_p0] to sequential footnotes like [1], [2],
     and returns the clean answer with footnotes, the citations metadata, and a completely plain text answer (no citations).
     """
+    if not answer or not isinstance(answer, str):
+        return "", [], ""
+        
     import re
     
     # 1. Remove XML tags like <chunk ...> and </chunk>

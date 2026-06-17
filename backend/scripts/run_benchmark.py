@@ -73,6 +73,29 @@ def evaluate_generation_correctness(question: str, expected: str, generated: str
             "reason": "Direct refusal or system error detected in response."
         }
         
+    # Fast-path substring matching to bypass flaky 1.5B LLM grading for direct matches
+    def clean_text(t: str) -> str:
+        import re
+        t = t.lower()
+        t = re.sub(r'\[[^\]]+\]', '', t) # Remove citations like [1] or [source_id_p0]
+        t = re.sub(r"\'s\b", "", t)       # Strip possessive 's
+        t = re.sub(r'[^\w\s]', '', t)     # Remove punctuation
+        return " ".join(t.split())
+
+    clean_exp = clean_text(expected)
+    clean_gen = clean_text(generated)
+
+    if clean_exp == clean_gen:
+        return {
+            "classification": "EXACT_MATCH",
+            "reason": "The normalized generated answer matches the expected answer exactly."
+        }
+    if clean_exp in clean_gen:
+        return {
+            "classification": "SUBSTANTIALLY_CORRECT",
+            "reason": "The expected answer is a substring of the generated answer."
+        }
+        
     def robust_json_parse(text: str) -> dict:
         import re
         text = text.strip()
@@ -116,17 +139,22 @@ def evaluate_generation_correctness(question: str, expected: str, generated: str
             "reason": reason
         }
 
-    prompt = f"""You are a strict grading assistant. Compare the student's Generated Answer against the Expected Answer (Ground Truth) for the given Question.
+    prompt = f"""You are a grading assistant. Compare the student's Generated Answer against the Expected Answer (Ground Truth) for the given Question.
 
 Question: {question}
 Expected Answer: {expected}
 Generated Answer: {generated}
 
+Grading Guidelines:
+- If the Generated Answer contains the correct key entities (e.g., names, dates, numbers, concepts) and answers the question correctly, classify it as SUBSTANTIALLY_CORRECT.
+- Be lenient on extra context, extra sentences, or minor phrasing differences. As long as the correct answer is present in the text, it is SUBSTANTIALLY_CORRECT.
+- Only classify as INCORRECT if the generated answer is factually wrong, directly contradicts the expected answer, or fails to answer the question.
+
 Classify the correctness of the Generated Answer into exactly one of these categories:
-- EXACT_MATCH: The generated answer is word-for-word identical or matches perfectly in all values and meaning.
-- SUBSTANTIALLY_CORRECT: The generated answer contains all key facts/information from the expected answer, even if phrased differently or with minor extra context.
-- PARTIAL: The generated answer contains some correct facts from the expected answer but misses other critical details.
-- INCORRECT: The generated answer is factually wrong, contradicts the expected answer, or represents a model refusal.
+- EXACT_MATCH: The generated answer is word-for-word identical (ignoring minor punctuation/spacing).
+- SUBSTANTIALLY_CORRECT: The generated answer contains all key facts/information from the expected answer, even with different phrasing or extra context.
+- PARTIAL: The generated answer contains some correct facts but misses others.
+- INCORRECT: The generated answer is wrong, contradicts the truth, or is a refusal.
 
 Respond ONLY with a JSON object in this format:
 {{

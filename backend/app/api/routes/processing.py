@@ -183,6 +183,35 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                         except Exception as e:
                             logger.error(f"Failed to process Text source {src.id}: {e}")
                             src.status = "failed"
+            elif step == "embedding_generation":
+                from app.core.processors.embeddings import EmbeddingProcessor
+                processor = EmbeddingProcessor()
+                for src in sources:
+                    if src.status == "processing":
+                        if cancel_event.is_set():
+                            logger.info(f"Cancellation requested during Embedding processing. Stopping thread for {workspace_id}")
+                            return
+                        try:
+                            # Generate embeddings for this source (processes chunks JSON)
+                            res = processor.process(workspace_id, src.id)
+                            # Update stats if embedding processor successfully processed
+                            if "chunks_count" in res and src.stats:
+                                src.stats["chunks"] = res["chunks_count"]
+                        except Exception as e:
+                            logger.error(f"Failed to generate embeddings for source {src.id}: {e}")
+                            src.status = "failed"
+            elif step == "building_knowledge_base":
+                from app.core.processors.vector_db import VectorDBProcessor
+                processor = VectorDBProcessor()
+                if cancel_event.is_set():
+                    logger.info(f"Cancellation requested during Knowledge Base building. Stopping thread for {workspace_id}")
+                    return
+                try:
+                    # Compile vectors and build the workspace FAISS index
+                    processor.process(workspace_id)
+                except Exception as e:
+                    logger.error(f"Failed to build vector index for workspace {workspace_id}: {e}")
+                    raise RuntimeError(f"Failed to build knowledge base: {e}")
             else:
                 step_duration = 3.0
                 poll_interval = 0.2

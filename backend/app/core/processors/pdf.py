@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List
 
+from app.core.processors.text import find_chunk_boundaries, find_parent_child_boundaries
+
 logger = logging.getLogger("kivo.processors.pdf")
 
 class PDFProcessor:
@@ -42,49 +44,53 @@ class PDFProcessor:
             total_chars += len(text)
             
         # 2. Chunk text page-by-page to preserve precise page boundaries for citations
-        chunks = []
-        chunk_idx = 0
+        child_chunks = []
+        parent_texts = []
+        child_idx = 0
         
         for page_num, page_text in enumerate(pages_text):
-            page_text_len = len(page_text)
-            if page_text_len == 0:
+            if not page_text.strip():
                 continue
                 
-            # If the page text fits inside a single chunk size, just add it.
-            if page_text_len <= self.chunk_size:
-                chunks.append({
-                    "index": chunk_idx,
-                    "text": page_text.strip(),
-                    "metadata": {"page": page_num + 1}
-                })
-                chunk_idx += 1
-                continue
-                
-            # Otherwise, split page text into overlapping chunks
-            start = 0
-            while start < page_text_len:
-                end = min(start + self.chunk_size, page_text_len)
-                chunk_text = page_text[start:end].strip()
+            parent_offset = len(parent_texts)
+            
+            page_parents, page_children_boundaries = find_parent_child_boundaries(
+                page_text,
+                parent_size=self.chunk_size,
+                parent_overlap=self.chunk_overlap,
+                child_size=250,
+                child_overlap=50
+            )
+            
+            parent_texts.extend(page_parents)
+            
+            for c_start, c_end, rel_p_idx in page_children_boundaries:
+                chunk_text = page_text[c_start:c_end].strip()
                 if chunk_text:
-                    chunks.append({
-                        "index": chunk_idx,
+                    child_chunks.append({
+                        "index": child_idx,
                         "text": chunk_text,
-                        "metadata": {"page": page_num + 1}
+                        "metadata": {
+                            "page": page_num + 1,
+                            "parent_id": parent_offset + rel_p_idx
+                        }
                     })
-                    chunk_idx += 1
+                    child_idx += 1
                 
-                # Slide window
-                start += (self.chunk_size - self.chunk_overlap)
-                
-        # 3. Save chunks to storage/workspaces/<workspace_id>/chunks/<source_id>.json
-        # The file_path is storage/workspaces/<workspace_id>/sources/<filename>
-        # So file_path.parent is 'sources' directory, and file_path.parent.parent is '<workspace_id>' directory
-        chunks_dir = file_path.parent.parent / "chunks"
+        # 3. Save chunks and parent chunks
+        workspace_dir = file_path.parent.parent
+        
+        parent_chunks_dir = workspace_dir / "parent_chunks"
+        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
+        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
+        with open(parent_chunks_file, "w") as f:
+            json.dump(parent_texts, f, indent=2)
+            
+        chunks_dir = workspace_dir / "chunks"
         chunks_dir.mkdir(parents=True, exist_ok=True)
         chunks_file = chunks_dir / f"{source_id}.json"
-        
         with open(chunks_file, "w") as f:
-            json.dump(chunks, f, indent=2)
+            json.dump(child_chunks, f, indent=2)
             
         # 4. Generate summary preview (first 300 characters of the document)
         preview_text = ""
@@ -97,12 +103,12 @@ class PDFProcessor:
         
         doc.close()
         
-        logger.info(f"PDF processed: {page_count} pages, {total_words} words, {len(chunks)} chunks generated.")
+        logger.info(f"PDF processed: {page_count} pages, {total_words} words, {len(child_chunks)} child chunks, {len(parent_texts)} parent chunks generated.")
         return {
             "stats": {
                 "pages": page_count,
                 "words": total_words,
-                "chunks": len(chunks)
+                "chunks": len(child_chunks)
             },
             "summary": summary
         }

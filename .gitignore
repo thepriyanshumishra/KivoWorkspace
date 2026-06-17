@@ -30,3 +30,4 @@ docs/
 # Logs and temp files
 *.log
 tmp/
+backend/scratch/

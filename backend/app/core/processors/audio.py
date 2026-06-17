@@ -12,6 +12,7 @@ from typing import Dict, Any, List
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 from app.core.config import settings
+from app.core.processors.text import find_chunk_boundaries, find_parent_child_boundaries
 
 logger = logging.getLogger("kivo.processors.audio")
 
@@ -91,58 +92,55 @@ class AudioProcessor:
                 
             return chunk_start, chunk_end
 
-        # 3. Chunk transcript using sliding window character splitter
-        chunks = []
-        chunk_idx = 0
+        # 3. Chunk transcript using boundary-aware splitter
+        child_chunks = []
+        parent_texts = []
+        child_idx = 0
         
-        if total_chars > 0:
-            if total_chars <= self.chunk_size:
-                chunk_start, chunk_end = get_timestamps_for_range(0, total_chars)
-                chunks.append({
-                    "index": chunk_idx,
-                    "text": clean_text,
-                    "metadata": {
-                        "start_time": chunk_start,
-                        "end_time": chunk_end
-                    }
-                })
-                chunk_idx += 1
-            else:
-                start = 0
-                while start < total_chars:
-                    end = min(start + self.chunk_size, total_chars)
-                    chunk_text = clean_text[start:end].strip()
-                    if chunk_text:
-                        chunk_start, chunk_end = get_timestamps_for_range(start, end)
-                        chunks.append({
-                            "index": chunk_idx,
-                            "text": chunk_text,
-                            "metadata": {
-                                "start_time": chunk_start,
-                                "end_time": chunk_end
-                            }
-                        })
-                        chunk_idx += 1
+        if clean_text:
+            parent_texts, child_boundaries = find_parent_child_boundaries(
+                clean_text,
+                parent_size=self.chunk_size,
+                parent_overlap=self.chunk_overlap,
+                child_size=250,
+                child_overlap=50
+            )
+            for start_idx, end_idx, parent_idx in child_boundaries:
+                chunk_text = clean_text[start_idx:end_idx].strip()
+                if chunk_text:
+                    chunk_start, chunk_end = get_timestamps_for_range(start_idx, end_idx)
+                    child_chunks.append({
+                        "index": child_idx,
+                        "text": chunk_text,
+                        "metadata": {
+                            "start_time": chunk_start,
+                            "end_time": chunk_end,
+                            "parent_id": parent_idx
+                        }
+                    })
+                    child_idx += 1
                     
-                    # Slide window
-                    start += (self.chunk_size - self.chunk_overlap)
-                    
-        # 4. Save chunks to storage/workspaces/<workspace_id>/chunks/<source_id>.json
+        # 4. Save chunks and parent chunks
+        parent_chunks_dir = chunks_dir.parent / "parent_chunks"
+        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
+        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
+        with open(parent_chunks_file, "w") as f:
+            json.dump(parent_texts, f, indent=2)
+            
         chunks_dir.mkdir(parents=True, exist_ok=True)
         chunks_file = chunks_dir / f"{source_id}.json"
-        
         with open(chunks_file, "w") as f:
-            json.dump(chunks, f, indent=2)
+            json.dump(child_chunks, f, indent=2)
             
         # 5. Generate summary preview (first 300 characters of the document)
         summary = clean_text[:300].strip() + ("..." if total_chars > 300 else "")
         
-        logger.info(f"Generated {len(chunks)} chunks, {total_words} words for source {source_id}.")
+        logger.info(f"Generated {len(child_chunks)} child chunks, {len(parent_texts)} parent chunks, {total_words} words for source {source_id}.")
         return {
             "stats": {
                 "duration": duration,
                 "words": total_words,
-                "chunks": len(chunks)
+                "chunks": len(child_chunks)
             },
             "summary": summary
         }

@@ -2,7 +2,7 @@
 # Purpose: Local vector database index compilation pipeline.
 # Responsibilities:
 #   1. Compiles all computed chunk embeddings and texts for a workspace.
-#   2. Truncates vectors from 768 to 256 dimensions (Matryoshka/Elastic embedding compression).
+#   2. Indexes full 768-dimensional embeddings (no dimension truncation).
 #   3. Normalizes vectors and builds a workspace-wide FAISS IndexFlatIP.
 #   4. Persists the index (index.faiss) and mapping file (chunk_map.json) to disk.
 
@@ -20,13 +20,13 @@ logger = logging.getLogger("kivo.processors.vector_db")
 
 
 class VectorDBProcessor:
-    def __init__(self, dimension: int = 256):
+    def __init__(self, dimension: int = 768):
         self.dimension = dimension
 
     def process(self, workspace_id: str) -> Dict[str, Any]:
         """
-        Loads all chunks and embeddings for the workspace, truncates the embeddings,
-        normalizes them, builds/saves a FAISS index, and saves the matching chunk_map.json.
+        Loads all chunks and embeddings for the workspace, normalizes them,
+        builds/saves a FAISS index, and saves the matching chunk_map.json.
         """
         logger.info(f"Building FAISS Vector Index for workspace {workspace_id}...")
         workspace_dir = settings.workspaces_dir / workspace_id
@@ -67,13 +67,13 @@ class VectorDBProcessor:
                     )
                     continue
 
-                # Slice to 256 dimensions (Matryoshka representation) and copy to make C-contiguous
-                truncated = vectors[:, :self.dimension].copy()
+                # Ensure contiguous memory layout for FAISS
+                vectors_contiguous = vectors.copy().astype(np.float32)
                 
-                # Normalize truncated vectors to unit length so Inner Product matches Cosine Similarity
-                faiss.normalize_L2(truncated)
+                # Normalize vectors to unit length so Inner Product matches Cosine Similarity
+                faiss.normalize_L2(vectors_contiguous)
 
-                all_vectors.append(truncated)
+                all_vectors.append(vectors_contiguous)
 
                 for idx, chunk in enumerate(chunks):
                     chunk_map.append({

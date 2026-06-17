@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 from readability import Document
 
 from app.core.config import settings
+from app.core.processors.text import find_chunk_boundaries, find_parent_child_boundaries
 
 logger = logging.getLogger("kivo.processors.website")
 
@@ -203,37 +204,51 @@ class WebsiteProcessor:
             final_text = f"No readable content could be extracted from: {url}"
 
         # ── Step 4: Chunk text ────────────────────────────────────────────────
-        chunks = []
-        chunk_idx = 0
-        text_len = len(final_text)
-        start = 0
+        child_chunks = []
+        parent_texts = []
+        child_idx = 0
 
-        while start < text_len:
-            end = min(start + self.chunk_size, text_len)
-            chunk_text = final_text[start:end].strip()
-            if chunk_text:
-                chunks.append({
-                    "index": chunk_idx,
-                    "text": chunk_text,
-                    "metadata": {"url": url}
-                })
-                chunk_idx += 1
-            start += (self.chunk_size - self.chunk_overlap)
+        if final_text:
+            parent_texts, child_boundaries = find_parent_child_boundaries(
+                final_text,
+                parent_size=self.chunk_size,
+                parent_overlap=self.chunk_overlap,
+                child_size=250,
+                child_overlap=50
+            )
+            for start_idx, end_idx, parent_idx in child_boundaries:
+                chunk_text = final_text[start_idx:end_idx].strip()
+                if chunk_text:
+                    child_chunks.append({
+                        "index": child_idx,
+                        "text": chunk_text,
+                        "metadata": {
+                            "url": url,
+                            "parent_id": parent_idx
+                        }
+                    })
+                    child_idx += 1
 
         # ── Step 5: Persist chunks to disk ────────────────────────────────────
         workspace_dir = settings.workspaces_dir / workspace_id
+        
+        parent_chunks_dir = workspace_dir / "parent_chunks"
+        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
+        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
+        with open(parent_chunks_file, "w", encoding="utf-8") as f:
+            json.dump(parent_texts, f, indent=2)
+            
         chunks_dir = workspace_dir / "chunks"
         chunks_dir.mkdir(parents=True, exist_ok=True)
         chunks_file = chunks_dir / f"{source_id}.json"
-
         with open(chunks_file, "w", encoding="utf-8") as f:
-            json.dump(chunks, f, indent=2)
+            json.dump(child_chunks, f, indent=2)
 
         summary = final_text[:300].strip() + ("..." if len(final_text) > 300 else "")
         total_words = len(final_text.split())
 
         logger.info(
-            f"Website processed: '{page_title}' | {total_words} words | {len(chunks)} chunks"
+            f"Website processed: '{page_title}' | {total_words} words | {len(child_chunks)} child chunks | {len(parent_texts)} parent chunks"
         )
 
         return {
@@ -241,7 +256,7 @@ class WebsiteProcessor:
             "stats": {
                 "pages": 1,
                 "words": total_words,
-                "chunks": len(chunks)
+                "chunks": len(child_chunks)
             },
             "summary": summary
         }

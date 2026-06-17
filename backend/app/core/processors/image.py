@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
+from app.core.processors.text import find_chunk_boundaries, find_parent_child_boundaries
+
 logger = logging.getLogger("kivo.processors.image")
 
 class ImageProcessor:
@@ -40,52 +42,57 @@ class ImageProcessor:
         total_words = len(clean_text.split())
         total_chars = len(clean_text)
         
-        # 2. Chunk text using a sliding window
-        chunks = []
-        chunk_idx = 0
+        # 2. Chunk text using boundary-aware splitter
+        child_chunks = []
+        parent_texts = []
+        child_idx = 0
         
-        if total_chars > 0:
-            if total_chars <= self.chunk_size:
-                chunks.append({
-                    "index": chunk_idx,
-                    "text": clean_text,
-                    "metadata": {"image_dimensions": f"{width}x{height}"}
-                })
-                chunk_idx += 1
-            else:
-                start = 0
-                while start < total_chars:
-                    end = min(start + self.chunk_size, total_chars)
-                    chunk_text = clean_text[start:end].strip()
-                    if chunk_text:
-                        chunks.append({
-                            "index": chunk_idx,
-                            "text": chunk_text,
-                            "metadata": {"image_dimensions": f"{width}x{height}"}
-                        })
-                        chunk_idx += 1
+        if clean_text:
+            parent_texts, child_boundaries = find_parent_child_boundaries(
+                clean_text,
+                parent_size=self.chunk_size,
+                parent_overlap=self.chunk_overlap,
+                child_size=250,
+                child_overlap=50
+            )
+            for start_idx, end_idx, parent_idx in child_boundaries:
+                chunk_text = clean_text[start_idx:end_idx].strip()
+                if chunk_text:
+                    child_chunks.append({
+                        "index": child_idx,
+                        "text": chunk_text,
+                        "metadata": {
+                            "image_dimensions": f"{width}x{height}",
+                            "parent_id": parent_idx
+                        }
+                    })
+                    child_idx += 1
                     
-                    # Slide window
-                    start += (self.chunk_size - self.chunk_overlap)
-                    
-        # 3. Save chunks to storage/workspaces/<workspace_id>/chunks/<source_id>.json
-        chunks_dir = file_path.parent.parent / "chunks"
+        # 3. Save chunks and parent chunks
+        workspace_dir = file_path.parent.parent
+        
+        parent_chunks_dir = workspace_dir / "parent_chunks"
+        parent_chunks_dir.mkdir(parents=True, exist_ok=True)
+        parent_chunks_file = parent_chunks_dir / f"{source_id}.json"
+        with open(parent_chunks_file, "w") as f:
+            json.dump(parent_texts, f, indent=2)
+            
+        chunks_dir = workspace_dir / "chunks"
         chunks_dir.mkdir(parents=True, exist_ok=True)
         chunks_file = chunks_dir / f"{source_id}.json"
-        
         with open(chunks_file, "w") as f:
-            json.dump(chunks, f, indent=2)
+            json.dump(child_chunks, f, indent=2)
             
         # 4. Generate summary preview (first 300 characters of the document)
         summary = clean_text[:300].strip() + ("..." if total_chars > 300 else "")
         
-        logger.info(f"Image processed: {width}x{height}, {total_words} words, {len(chunks)} chunks generated.")
+        logger.info(f"Image processed: {width}x{height}, {total_words} words, {len(child_chunks)} child chunks, {len(parent_texts)} parent chunks generated.")
         return {
             "stats": {
                 "width": width,
                 "height": height,
                 "words": total_words,
-                "chunks": len(chunks)
+                "chunks": len(child_chunks)
             },
             "summary": summary
         }

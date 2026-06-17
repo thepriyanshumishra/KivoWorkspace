@@ -85,10 +85,12 @@ async def health_check():
 from app.api.routes.workspaces import router as workspaces_router
 from app.api.routes.sources import router as sources_router
 from app.api.routes.processing import router as processing_router
+from app.api.routes.chat import router as chat_router
 
 app.include_router(workspaces_router, prefix="/workspaces", tags=["Workspaces"])
 app.include_router(sources_router, prefix="/workspaces/{workspace_id}/sources", tags=["Sources"])
 app.include_router(processing_router, prefix="/workspaces/{workspace_id}/processing", tags=["Processing"])
+app.include_router(chat_router, prefix="/workspaces/{workspace_id}/chat", tags=["Chat"])
 
 
 

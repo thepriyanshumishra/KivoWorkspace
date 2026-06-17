@@ -32,10 +32,10 @@ def get_embedding_model():
     import torch
     import platform
 
-    # Determine best device (MPS is only stable/functional on Apple Silicon arm64 Macs)
-    if torch.backends.mps.is_available() and platform.machine() == "arm64":
-        device = "mps"
-    elif torch.cuda.is_available():
+    # Determine best device
+    # Note: PyTorch MPS backend can crash/segfault with exit code 139 on certain custom transformer operations
+    # in gte-multilingual-base. We force CPU on macOS to ensure 100% stability.
+    if torch.cuda.is_available():
         device = "cuda"
     else:
         device = "cpu"

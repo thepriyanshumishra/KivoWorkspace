@@ -122,15 +122,53 @@ class ProcessingScreen extends ConsumerWidget {
       body: statusState.when(
         loading: () => const Center(child: CircularProgressIndicator.adaptive()),
         error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline_rounded, size: 48, color: colors.statusFailed),
-              const SizedBox(height: 16),
-              Text('Failed to query status', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Text(error.toString(), style: TextStyle(color: colors.textSecondary)),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline_rounded, size: 48, color: colors.statusFailed),
+                const SizedBox(height: 16),
+                Text('Failed to query status', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text(
+                  error.toString(),
+                  style: TextStyle(color: colors.textSecondary),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        if (context.canPop()) {
+                          context.pop();
+                        } else {
+                          context.go('/');
+                        }
+                      },
+                      icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                      label: const Text('Go Back'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.textSecondary,
+                        side: BorderSide(color: colors.border),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    ElevatedButton.icon(
+                      onPressed: () => ref.invalidate(processingStatusProvider(workspaceId)),
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Retry Connection'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         data: (status) {

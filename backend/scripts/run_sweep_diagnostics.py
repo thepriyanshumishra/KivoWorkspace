@@ -52,13 +52,9 @@ def run_diagnostics():
     print(f"Loaded {len(questions)} questions from benchmark_v1.json")
     print(f"Fast LLM Generation Sweep will run on {len(REPRESENTATIVE_QUESTIONS)} representative questions (IDs: {REPRESENTATIVE_QUESTIONS})\n")
     
-    # Extended sweep including 600, 750, 800, 900, and 1000 characters
+    # Selected optimal configuration (750 child size, 150 overlap)
     sweep_configs = [
-        {"child_size": 600, "child_overlap": 120},
-        {"child_size": 750, "child_overlap": 150},
-        {"child_size": 800, "child_overlap": 160},
-        {"child_size": 900, "child_overlap": 180},
-        {"child_size": 1000, "child_overlap": 200}
+        {"child_size": 750, "child_overlap": 150}
     ]
     
     sweep_results = {}

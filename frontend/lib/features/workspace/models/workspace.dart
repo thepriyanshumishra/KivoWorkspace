@@ -28,6 +28,7 @@ class Workspace {
   final DateTime createdAt;
   final WorkspaceStatus status;
   final int sourcesCount;
+  final String instructions;
 
   Workspace({
     required this.id,
@@ -35,6 +36,7 @@ class Workspace {
     required this.createdAt,
     required this.status,
     required this.sourcesCount,
+    this.instructions = '',
   });
 
   factory Workspace.fromJson(Map<String, dynamic> json) {
@@ -44,6 +46,7 @@ class Workspace {
       createdAt: DateTime.parse(json['created_at'] as String),
       status: WorkspaceStatus.fromString(json['status'] as String? ?? 'ready'),
       sourcesCount: json['sources_count'] as int? ?? 0,
+      instructions: json['instructions'] as String? ?? '',
     );
   }
 
@@ -54,6 +57,7 @@ class Workspace {
       'created_at': createdAt.toIso8601String(),
       'status': status.toJson(),
       'sources_count': sourcesCount,
+      'instructions': instructions,
     };
   }
 
@@ -63,6 +67,7 @@ class Workspace {
     DateTime? createdAt,
     WorkspaceStatus? status,
     int? sourcesCount,
+    String? instructions,
   }) {
     return Workspace(
       id: id ?? this.id,
@@ -70,6 +75,7 @@ class Workspace {
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       sourcesCount: sourcesCount ?? this.sourcesCount,
+      instructions: instructions ?? this.instructions,
     );
   }
 }

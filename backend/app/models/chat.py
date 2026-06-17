@@ -19,3 +19,4 @@ class ChatResponse(BaseModel):
     plain_answer: str = Field(..., description="Answer stripped of citation markers")
     citations: List[Citation] = Field(..., description="List of citation footnotes mapped to source documents")
     latency_ms: int = Field(..., description="Total processing latency in milliseconds")
+    recommended_questions: List[str] = Field(default_factory=list, description="Follow-up recommended questions")

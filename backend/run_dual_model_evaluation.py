@@ -9,6 +9,12 @@
 #   6. Cleans up the temporary workspace.
 
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 import json
 import time
@@ -174,7 +180,7 @@ Answer:"""
     
     t0 = time.time()
     try:
-        response = requests.post(url, json=payload, timeout=60)
+        response = requests.post(url, json=payload, timeout=180)
         latency = time.time() - t0
         if response.status_code == 200:
             result = response.json()

@@ -8,12 +8,17 @@ from typing import Optional
 
 class WorkspaceBase(BaseModel):
     name: str = Field(..., description="The name of the workspace", min_length=1, max_length=100)
+    instructions: Optional[str] = Field("", description="Custom workspace system instructions")
 
 class WorkspaceCreate(WorkspaceBase):
     pass
 
 class WorkspaceRename(WorkspaceBase):
     pass
+
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = Field(None, description="The name of the workspace", min_length=1, max_length=100)
+    instructions: Optional[str] = Field(None, description="Custom workspace system instructions")
 
 class Workspace(WorkspaceBase):
     id: str = Field(..., description="Unique workspace identifier")

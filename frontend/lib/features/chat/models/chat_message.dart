@@ -9,11 +9,13 @@ class ChatMessage {
   final bool isUser;
   final DateTime timestamp;
   final List<Citation> citations;
+  final List<String> recommendedQuestions;
 
   ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
     this.citations = const [],
+    this.recommendedQuestions = const [],
   });
 }

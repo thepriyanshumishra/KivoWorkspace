@@ -11,6 +11,13 @@ logger = logging.getLogger("kivo.core.database")
 
 def get_db_connection(workspace_id: str) -> sqlite3.Connection:
     workspace_dir = settings.workspaces_dir / workspace_id
+    
+    # If the workspace directory and metadata.json both don't exist,
+    # the workspace has been deleted. Do not recreate it!
+    metadata_file = workspace_dir / "metadata.json"
+    if not workspace_dir.exists() and not metadata_file.exists():
+        raise FileNotFoundError(f"Workspace {workspace_id} has been deleted.")
+        
     workspace_dir.mkdir(parents=True, exist_ok=True)
     db_path = workspace_dir / "metadata.db"
     

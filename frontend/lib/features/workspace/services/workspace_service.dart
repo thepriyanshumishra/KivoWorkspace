@@ -70,6 +70,24 @@ class WorkspaceService {
     }
   }
 
+  Future<Workspace> updateWorkspace(String id, {String? name, String? instructions}) async {
+    final Map<String, dynamic> body = {};
+    if (name != null) body['name'] = name;
+    if (instructions != null) body['instructions'] = instructions;
+
+    final response = await _client.put(
+      Uri.parse('${AppConstants.backendBaseUrl}${AppConstants.workspacesEndpoint}/$id'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(body),
+    );
+
+    if (response.statusCode == 200) {
+      return Workspace.fromJson(json.decode(utf8.decode(response.bodyBytes)));
+    } else {
+      throw Exception('Failed to update workspace settings: Status ${response.statusCode}');
+    }
+  }
+
   Future<void> deleteWorkspace(String id) async {
     final response = await _client.delete(
       Uri.parse('${AppConstants.backendBaseUrl}${AppConstants.workspacesEndpoint}/$id'),

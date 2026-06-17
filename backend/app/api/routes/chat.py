@@ -34,7 +34,8 @@ def query_workspace(
             answer=res["answer"],
             plain_answer=res["plain_answer"],
             citations=res["citations"],
-            latency_ms=res["latency_ms"]
+            latency_ms=res["latency_ms"],
+            recommended_questions=res.get("recommended_questions", [])
         )
     except Exception as e:
         logger.error(f"Error querying workspace {workspace_id}: {e}")

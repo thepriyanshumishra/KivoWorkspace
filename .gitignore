@@ -31,3 +31,5 @@ docs/
 *.log
 tmp/
 backend/scratch/
+problem.txt
+problem*.txt

@@ -17,21 +17,25 @@ class ChatResponseDto {
   final String plainAnswer;
   final List<Citation> citations;
   final int latencyMs;
+  final List<String> recommendedQuestions;
 
   ChatResponseDto({
     required this.answer,
     required this.plainAnswer,
     required this.citations,
     required this.latencyMs,
+    required this.recommendedQuestions,
   });
 
   factory ChatResponseDto.fromJson(Map<String, dynamic> json) {
     final List<dynamic> citationList = json['citations'] as List<dynamic>? ?? [];
+    final List<dynamic> recommendedList = json['recommended_questions'] as List<dynamic>? ?? [];
     return ChatResponseDto(
       answer: json['answer'] as String,
       plainAnswer: json['plain_answer'] as String? ?? json['answer'] as String,
       citations: citationList.map((c) => Citation.fromJson(c)).toList(),
       latencyMs: json['latency_ms'] as int? ?? 0,
+      recommendedQuestions: List<String>.from(recommendedList),
     );
   }
 }

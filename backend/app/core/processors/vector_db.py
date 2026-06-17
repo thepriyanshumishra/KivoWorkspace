@@ -6,6 +6,7 @@
 #   3. Normalizes vectors and builds a workspace-wide FAISS IndexFlatIP.
 #   4. Persists the index (index.faiss) and mapping file (chunk_map.json) to disk.
 
+import torch  # Prevent OpenMP/MKL conflict with faiss on macOS
 import json
 import logging
 from pathlib import Path
@@ -30,6 +31,9 @@ class VectorDBProcessor:
         """
         logger.info(f"Building FAISS Vector Index for workspace {workspace_id}...")
         workspace_dir = settings.workspaces_dir / workspace_id
+        if not workspace_dir.exists():
+            logger.warning(f"Workspace directory {workspace_dir} does not exist. Aborting FAISS index building.")
+            return {"vectors_indexed": 0, "dimension": self.dimension}
         
         # Load all sources registered in sources.json
         sources = load_sources(workspace_id)

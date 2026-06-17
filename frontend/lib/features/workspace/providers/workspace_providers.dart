@@ -56,6 +56,18 @@ class WorkspacesNotifier extends StateNotifier<AsyncValue<List<Workspace>>> {
     }
   }
 
+  Future<void> updateWorkspaceSettings(String id, {String? name, String? instructions}) async {
+    try {
+      final updated = await _service.updateWorkspace(id, name: name, instructions: instructions);
+      state.whenData((currentList) {
+        final updatedList = currentList.map((w) => w.id == id ? updated : w).toList();
+        state = AsyncValue.data(updatedList);
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   Future<void> deleteWorkspace(String id) async {
     try {
       await _service.deleteWorkspace(id);

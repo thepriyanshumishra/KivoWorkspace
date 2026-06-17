@@ -41,6 +41,9 @@ def load_sources(workspace_id: str) -> List[Source]:
 
 def save_sources(workspace_id: str, sources: List[Source]):
     sources_file = get_sources_json_path(workspace_id)
+    if not sources_file.parent.exists():
+        logger.warning(f"Workspace directory {sources_file.parent} does not exist. Skipping save_sources.")
+        return
     try:
         with open(sources_file, "w") as f:
             # Serialize each pydantic model in the list

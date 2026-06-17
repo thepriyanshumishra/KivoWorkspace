@@ -60,6 +60,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
         isUser: false,
         timestamp: DateTime.now(),
         citations: responseDto.citations,
+        recommendedQuestions: responseDto.recommendedQuestions,
       );
 
       state = state.copyWith(
@@ -76,6 +77,10 @@ class ChatNotifier extends StateNotifier<ChatState> {
 
   void clearError() {
     state = state.copyWith(errorMessage: null);
+  }
+
+  void clearChat() {
+    state = ChatState(messages: const []);
   }
 }
 

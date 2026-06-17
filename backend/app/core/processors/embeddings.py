@@ -62,6 +62,14 @@ class EmbeddingProcessor:
         all chunks, and saves them to a NumPy binary file for cached storage.
         """
         workspace_dir = settings.workspaces_dir / workspace_id
+        if not workspace_dir.exists():
+            logger.warning(f"Workspace directory {workspace_dir} does not exist. Aborting embedding generation.")
+            return {
+                "source_id": source_id,
+                "chunks_count": 0,
+                "embedding_dim": 0,
+                "cached": False
+            }
         
         # Ensure directories exist
         embeddings_dir = workspace_dir / "embeddings"

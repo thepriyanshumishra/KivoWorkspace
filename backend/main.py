@@ -5,6 +5,14 @@
 # Responsibilities: Creates FastAPI app, configures CORS, registers routers,
 #                   ensures storage directories exist on startup.
 
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI

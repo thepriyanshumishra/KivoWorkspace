@@ -203,13 +203,15 @@ class ProcessingScreen extends ConsumerWidget {
               final isProcessing = status.isProcessing;
               return TextButton(
                 onPressed: isProcessing ? () => _cancelProcessing(context, ref) : null,
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: isProcessing ? colors.statusFailed : colors.textMuted,
-                    fontWeight: FontWeight.w500,
+                style: TextButton.styleFrom(
+                  foregroundColor: colors.statusFailed,
+                  disabledForegroundColor: colors.textMuted,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
                   ),
                 ),
+                child: const Text('Cancel Processing'),
               );
             },
             orElse: () => const SizedBox.shrink(),
@@ -717,6 +719,57 @@ class ProcessingScreen extends ConsumerWidget {
                           ),
                         ),
                       ],
+                      const SizedBox(height: 32),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: colors.statusReadyBg,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: colors.statusReady.withValues(alpha: 0.2)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_outline_rounded, color: colors.statusReady, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Workspace indexing runs in the background. You can safely navigate away.',
+                                style: TextStyle(
+                                  color: colors.textPrimary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => context.go(AppRoutes.home),
+                              icon: const Icon(Icons.home_outlined, size: 16),
+                              label: const Text('Back to Dashboard'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () => context.go(
+                                AppRoutes.workspace.replaceAll(':workspaceId', workspaceId),
+                              ),
+                              icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                              label: const Text('Open Chat Workspace'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.primary,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),

@@ -436,7 +436,7 @@ class _SourceTypeCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        hoverColor: colors.primarySubtle.withAlpha(100),
+        hoverColor: colors.textPrimary.withValues(alpha: 0.06),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
@@ -563,11 +563,11 @@ class _YouTubeUrlDialogState extends ConsumerState<_YouTubeUrlDialog> {
                 hintStyle: TextStyle(color: colors.textMuted, fontSize: 14),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(4),
                   borderSide: BorderSide(color: colors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(4),
                   borderSide: BorderSide(color: colors.primary),
                 ),
               ),
@@ -699,11 +699,11 @@ class _WebsiteUrlDialogState extends ConsumerState<_WebsiteUrlDialog> {
                 hintStyle: TextStyle(color: colors.textMuted, fontSize: 14),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(4),
                   borderSide: BorderSide(color: colors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(4),
                   borderSide: BorderSide(color: colors.primary),
                 ),
               ),
@@ -841,11 +841,11 @@ class _CopyTextDialogState extends ConsumerState<_CopyTextDialog> {
                   hintStyle: TextStyle(color: colors.textMuted, fontSize: 14),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(4),
                     borderSide: BorderSide(color: colors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(4),
                     borderSide: BorderSide(color: colors.primary),
                   ),
                 ),
@@ -870,11 +870,11 @@ class _CopyTextDialogState extends ConsumerState<_CopyTextDialog> {
                   alignLabelWithHint: true,
                   contentPadding: const EdgeInsets.all(12),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(4),
                     borderSide: BorderSide(color: colors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(4),
                     borderSide: BorderSide(color: colors.primary),
                   ),
                 ),

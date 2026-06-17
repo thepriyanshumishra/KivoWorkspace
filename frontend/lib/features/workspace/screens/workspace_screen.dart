@@ -9,6 +9,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:go_router/go_router.dart';
 import 'package:markdown/markdown.dart' as md;
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/font_provider.dart';
 import '../../../core/router/app_router.dart';
 import '../providers/workspace_providers.dart';
 import '../../source_upload/models/source.dart' as src_model;
@@ -352,6 +353,33 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
           onPressed: () => context.pop(),
         ),
         actions: [
+          PopupMenuButton<AppFontFamily>(
+            icon: Icon(Icons.font_download_outlined, size: 18, color: colors.textSecondary),
+            tooltip: 'Change Font style',
+            surfaceTintColor: Colors.transparent,
+            color: colors.surfaceElevated,
+            onSelected: (font) {
+              ref.read(fontProvider.notifier).state = font;
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: AppFontFamily.sans,
+                height: 32,
+                child: Text('Sans-Serif', style: TextStyle(fontSize: 13, color: colors.textPrimary)),
+              ),
+              PopupMenuItem(
+                value: AppFontFamily.serif,
+                height: 32,
+                child: Text('Serif', style: TextStyle(fontSize: 13, color: colors.textPrimary)),
+              ),
+              PopupMenuItem(
+                value: AppFontFamily.mono,
+                height: 32,
+                child: Text('Mono', style: TextStyle(fontSize: 13, color: colors.textPrimary)),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Workspace Settings',
@@ -489,14 +517,14 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                               elevation: 0,
                               margin: EdgeInsets.zero,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(4),
                                 side: BorderSide(color: colors.border),
                               ),
                               color: colors.surface,
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
                                 onTap: () => _showSourceDetailsDialog(context, source),
-                                hoverColor: colors.primarySubtle.withAlpha(100),
+                                hoverColor: colors.textPrimary.withValues(alpha: 0.06),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                   child: Row(
@@ -741,19 +769,23 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                                       : 'Upload and ingest sources to chat...',
                                   hintStyle: TextStyle(color: colors.textMuted, fontSize: 14),
                                   border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: colors.border),
+                                    borderRadius: BorderRadius.circular(4),
+                                    borderSide: BorderSide.none,
                                   ),
                                   enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: colors.border),
+                                    borderRadius: BorderRadius.circular(4),
+                                    borderSide: BorderSide.none,
                                   ),
                                   disabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(6),
-                                    borderSide: BorderSide(color: colors.border),
+                                    borderRadius: BorderRadius.circular(4),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(4),
+                                    borderSide: BorderSide(color: colors.primary, width: 1.0),
                                   ),
                                   filled: true,
-                                  fillColor: hasReadySources ? colors.background : colors.surfaceElevated,
+                                  fillColor: colors.surfaceElevated,
                                 ),
                                 onSubmitted: (_) => hasReadySources ? _sendMessage() : null,
                               ),

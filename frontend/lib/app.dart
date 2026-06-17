@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/font_provider.dart';
 import 'core/router/app_router.dart';
 
 class KivoApp extends ConsumerWidget {
@@ -12,11 +13,13 @@ class KivoApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final activeFont = ref.watch(fontProvider);
+
     return MaterialApp.router(
       title: 'Kivo Workspace',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
+      theme: AppTheme.themeFor(activeFont, isDark: false),
+      darkTheme: AppTheme.themeFor(activeFont, isDark: true),
       themeMode: ThemeMode.system,
       routerConfig: appRouter,
     );

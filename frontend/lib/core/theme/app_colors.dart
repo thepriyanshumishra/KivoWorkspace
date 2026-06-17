@@ -8,26 +8,26 @@ import 'package:flutter/material.dart';
 class AppColors extends ThemeExtension<AppColors> {
   // --- Light Palette Static Constants ---
   static const Color lightBackground = Color(0xFFFFFFFF);
-  static const Color lightSidebarBackground = Color(0xFFF7F7F5);
+  static const Color lightSidebarBackground = Color(0xFFFBFBFA);
   static const Color lightSurface = Color(0xFFFFFFFF);
-  static const Color lightSurfaceElevated = Color(0xFFFBFBFA);
-  static const Color lightBorder = Color(0xFFE9E9E7);
-  static const Color lightDivider = Color(0xFFE9E9E7);
+  static const Color lightSurfaceElevated = Color(0xFFF1F1EF);
+  static const Color lightBorder = Color(0xFFEDEDEB);
+  static const Color lightDivider = Color(0xFFEDEDEB);
 
-  static const Color lightPrimary = Color(0xFF2383E2);
-  static const Color lightPrimaryHover = Color(0xFF1B6CB8);
-  static const Color lightPrimarySubtle = Color(0xFFF1F6FB);
+  static const Color lightPrimary = Color(0xFF0075DE);
+  static const Color lightPrimaryHover = Color(0xFF005DB2);
+  static const Color lightPrimarySubtle = Color(0xFFE7F3F8);
 
   static const Color lightTextPrimary = Color(0xFF37352F);
   static const Color lightTextSecondary = Color(0xFF787774);
-  static const Color lightTextMuted = Color(0xFF9B9A97);
+  static const Color lightTextMuted = Color(0xFF9B9B9B);
 
   static const Color lightStatusReady = Color(0xFF0F7B44);
-  static const Color lightStatusReadyBg = Color(0xFFEDF6EC);
+  static const Color lightStatusReadyBg = Color(0xFFEDF3EC);
   static const Color lightStatusProcessing = Color(0xFFD9730D);
-  static const Color lightStatusProcessingBg = Color(0xFFFDEBEC);
-  static const Color lightStatusFailed = Color(0xFFC72828);
-  static const Color lightStatusFailedBg = Color(0xFFFBECEB);
+  static const Color lightStatusProcessingBg = Color(0xFFFFF1E6);
+  static const Color lightStatusFailed = Color(0xFFBA1A1A);
+  static const Color lightStatusFailedBg = Color(0xFFFFECEB);
   static const Color lightStatusCancelled = Color(0xFF787774);
 
   // --- Dark Palette Static Constants ---
@@ -38,12 +38,12 @@ class AppColors extends ThemeExtension<AppColors> {
   static const Color darkBorder = Color(0xFF2F2F2F);
   static const Color darkDivider = Color(0xFF2F2F2F);
 
-  static const Color darkPrimary = Color(0xFF2EAADC);
-  static const Color darkPrimaryHover = Color(0xFF1B82A8);
+  static const Color darkPrimary = Color(0xFF0075DE);
+  static const Color darkPrimaryHover = Color(0xFF005DB2);
   static const Color darkPrimarySubtle = Color(0xFF1B2A32);
 
-  static const Color darkTextPrimary = Color(0xFFE3E3E2);
-  static const Color darkTextSecondary = Color(0xFF9B9A97);
+  static const Color darkTextPrimary = Color(0xFFE3E2E0);
+  static const Color darkTextSecondary = Color(0xFF9B9B9B);
   static const Color darkTextMuted = Color(0xFF5F5E5B);
 
   static const Color darkStatusReady = Color(0xFF4DAB76);
@@ -52,7 +52,7 @@ class AppColors extends ThemeExtension<AppColors> {
   static const Color darkStatusProcessingBg = Color(0xFF3D2B1E);
   static const Color darkStatusFailed = Color(0xFFFF7373);
   static const Color darkStatusFailedBg = Color(0xFF3F1E1E);
-  static const Color darkStatusCancelled = Color(0xFF9B9A97);
+  static const Color darkStatusCancelled = Color(0xFF9B9B9B);
 
   // --- Instance Properties ---
   final Color background;

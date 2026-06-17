@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/font_provider.dart';
 import '../../../core/router/app_router.dart';
 import '../../workspace/models/workspace.dart';
 import '../../workspace/providers/workspace_providers.dart';
@@ -30,6 +31,33 @@ class HomeScreen extends ConsumerWidget {
         elevation: 0,
         scrolledUnderElevation: 0,
         actions: [
+          PopupMenuButton<AppFontFamily>(
+            icon: Icon(Icons.font_download_outlined, size: 18, color: colors.textSecondary),
+            tooltip: 'Change Font style',
+            surfaceTintColor: Colors.transparent,
+            color: colors.surfaceElevated,
+            onSelected: (font) {
+              ref.read(fontProvider.notifier).state = font;
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: AppFontFamily.sans,
+                height: 32,
+                child: Text('Sans-Serif', style: TextStyle(fontSize: 13, color: colors.textPrimary)),
+              ),
+              PopupMenuItem(
+                value: AppFontFamily.serif,
+                height: 32,
+                child: Text('Serif', style: TextStyle(fontSize: 13, color: colors.textPrimary)),
+              ),
+              PopupMenuItem(
+                value: AppFontFamily.mono,
+                height: 32,
+                child: Text('Mono', style: TextStyle(fontSize: 13, color: colors.textPrimary)),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
           Padding(
             padding: const EdgeInsets.only(right: 20, top: 8, bottom: 8),
             child: ElevatedButton.icon(
@@ -246,7 +274,7 @@ class _WorkspaceCard extends ConsumerWidget {
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         side: BorderSide(color: colors.border, width: 1),
       ),
       color: colors.surface,
@@ -258,7 +286,7 @@ class _WorkspaceCard extends ConsumerWidget {
             AppRoutes.workspace.replaceAll(':workspaceId', workspace.id),
           );
         },
-        hoverColor: colors.primarySubtle.withAlpha(100),
+        hoverColor: colors.textPrimary.withValues(alpha: 0.06),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -421,9 +449,9 @@ class _CreateWorkspaceDialogState extends ConsumerState<_CreateWorkspaceDialog> 
       final newW = await ref.read(workspacesProvider.notifier).createWorkspace(name);
       if (mounted) {
         Navigator.of(context).pop(); // Close dialog
-        // Automatically navigate to the new workspace detail screen
+        // Automatically navigate to the source upload screen for the new workspace
         context.push(
-          AppRoutes.workspace.replaceAll(':workspaceId', newW.id),
+          AppRoutes.sourceUpload.replaceAll(':workspaceId', newW.id),
         );
       }
     } catch (e) {

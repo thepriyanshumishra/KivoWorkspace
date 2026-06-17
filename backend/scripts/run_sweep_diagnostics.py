@@ -302,7 +302,7 @@ def run_diagnostics():
             )
             ans = res["answer"]
             latencies.append(res["latency_ms"])
-            is_ref = any(phrase in ans.lower() for phrase in refusal_phrases) or "error" in ans.lower()
+            is_ref = any(phrase in ans.lower() for phrase in refusal_phrases) or ans.lower().startswith("error:") or ans.lower().startswith("error calling")
             if is_ref:
                 ref_count += 1
                 
@@ -434,25 +434,32 @@ def run_diagnostics():
     report_str = "\n".join(report_lines)
     
     # Save files
+    scripts_results_dir = Path(__file__).parent / "results"
+    scripts_results_dir.mkdir(parents=True, exist_ok=True)
+    
     artifacts_dir = Path("/Users/thedarkpcm/.gemini/antigravity/brain/c5dc8fba-7b42-49be-9c39-1e8e2ed4bf2b")
-    if not artifacts_dir.exists():
-        artifacts_dir = Path(".")
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Write report
+    for path in [scripts_results_dir / "sprint11_1_diagnostic_report.md", artifacts_dir / "sprint11_1_diagnostic_report.md"]:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(report_str)
+            
+    # Write sweep metrics
+    sweep_metrics_data = {
+        "sweep_results": sweep_results,
+        "optimal_size": best_size,
+        "fast_llm_sweep": {
+            "representative_questions": REPRESENTATIVE_QUESTIONS,
+            "refusal_rates": llm_refusal_rates,
+            "latencies": llm_latencies
+        }
+    }
+    for path in [scripts_results_dir / "sweep_metrics.json", artifacts_dir / "sweep_metrics.json"]:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sweep_metrics_data, f, indent=2)
         
-    with open(artifacts_dir / "sprint11_1_diagnostic_report.md", "w", encoding="utf-8") as f:
-        f.write(report_str)
-        
-    with open(artifacts_dir / "sweep_metrics.json", "w", encoding="utf-8") as f:
-        json.dump({
-            "sweep_results": sweep_results,
-            "optimal_size": best_size,
-            "fast_llm_sweep": {
-                "representative_questions": REPRESENTATIVE_QUESTIONS,
-                "refusal_rates": llm_refusal_rates,
-                "latencies": llm_latencies
-            }
-        }, f, indent=2)
-        
-    print("\nSUCCESS: Sweep Diagnostics Complete. Generated sprint11_1_diagnostic_report.md")
+    print("\nSUCCESS: Sweep Diagnostics Complete. Generated sprint11_1_diagnostic_report.md and sweep_metrics.json")
 
 if __name__ == "__main__":
     run_diagnostics()

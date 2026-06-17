@@ -65,7 +65,7 @@ def get_overlapping_paragraphs(chunk_text):
 
 def evaluate_generation_correctness(question: str, expected: str, generated: str) -> dict:
     refusal_phrases = ["cannot answer", "not mention", "no mention", "not provide", "does not explain", "do not possess", "based on the provided context"]
-    is_obvious_refusal = any(phrase in generated.lower() for phrase in refusal_phrases) or "error" in generated.lower()
+    is_obvious_refusal = any(phrase in generated.lower() for phrase in refusal_phrases) or generated.lower().startswith("error:") or generated.lower().startswith("error calling")
     
     if is_obvious_refusal:
         return {
@@ -351,7 +351,7 @@ def run_benchmark():
         eval_reason = eval_res["reason"]
         
         # Refusal check
-        is_refusal = any(phrase in answer.lower() for phrase in refusal_phrases) or "error" in answer.lower()
+        is_refusal = any(phrase in answer.lower() for phrase in refusal_phrases) or answer.lower().startswith("error:") or answer.lower().startswith("error calling")
         if is_refusal:
             refusals += 1
             

@@ -26,7 +26,7 @@ from app.core.processors.vector_db import VectorDBProcessor
 from app.core.retriever import retrieve_and_generate, INTENT_REGEX, estimate_tokens
 
 # Import SAMPLE_TEXT and evaluation helpers
-from run_benchmark import SAMPLE_TEXT, SAMPLE_TEXT_PARAGRAPHS, get_overlapping_paragraphs
+from run_benchmark import SAMPLE_TEXT, SAMPLE_TEXT_PARAGRAPHS, get_overlapping_paragraphs, evaluate_generation_correctness
 
 # Representative questions for fast LLM generation sweep (one from each level)
 REPRESENTATIVE_QUESTIONS = [
@@ -316,6 +316,10 @@ def run_diagnostics():
             if is_ref:
                 ref_count += 1
                 
+            eval_res = evaluate_generation_correctness(q_text, q_item["expected_answer"], ans)
+            classification = eval_res["classification"]
+            eval_reason = eval_res["reason"]
+            
             r_childs = res["retrieved_child_chunks"]
             top_3_paragraphs = []
             for r in r_childs[:3]:
@@ -338,7 +342,9 @@ def run_diagnostics():
                     "recall": rec_val,
                     "is_refusal": is_ref,
                     "answer": ans,
-                    "expected": q_item["expected_answer"]
+                    "expected": q_item["expected_answer"],
+                    "correctness": classification,
+                    "correctness_reason": eval_reason
                 })
                 
         llm_refusal_rates[c_size] = ref_count / len(REPRESENTATIVE_QUESTIONS)
@@ -406,26 +412,15 @@ def run_diagnostics():
         "",
         "We classified failures on the representative questions where retrieval succeeded (Hit@3 = Yes, Recall >= 50%) but the generation requires audit:",
         "",
-        "| Child Size | Question | Recall | Is Refusal? | Failure Analysis |",
+        "| Child Size | Question | Recall | Correctness | Grader Reason |",
         "| :---: | :--- | :---: | :---: | :--- |"
     ])
     
     for item in correct_retrieval_incorrect_generation:
         q_num = item["number"]
-        is_ref = "⚠️ Yes (Refusal)" if item["is_refusal"] else "❌ No (Semantic Deviation)"
-        ans_lower = item["answer"].lower()
         
-        analysis = ""
-        if item["is_refusal"]:
-            analysis = "LLM safety alignment over-conservatism (refused to synthesize context)."
-        else:
-            if "watson" in ans_lower or "1945" in ans_lower or "1962" in ans_lower or "1973" in ans_lower:
-                analysis = "Extrapolation bias (Qwen hallucinated details not in context)."
-            else:
-                analysis = "Synthesis/Reasoning error (failed to connect multiple points in context)."
-                
         report_lines.append(
-            f"| **{item['child_size']} ch** | Q{q_num}: *{item['question']}* | {item['recall']:.0%} | {is_ref} | {analysis} |"
+            f"| **{item['child_size']} ch** | Q{q_num}: *{item['question']}* | {item['recall']:.0%} | `{item['correctness']}` | {item['correctness_reason']} |"
         )
         
     report_lines.extend([

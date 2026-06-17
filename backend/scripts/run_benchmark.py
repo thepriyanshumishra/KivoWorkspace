@@ -8,6 +8,7 @@ import logging
 import argparse
 from pathlib import Path
 import numpy as np
+import requests
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
@@ -61,6 +62,78 @@ def get_overlapping_paragraphs(chunk_text):
         elif p_clean in chunk_text or chunk_text in p_clean:
             overlapping.append(idx)
     return list(set(overlapping))
+
+def evaluate_generation_correctness(question: str, expected: str, generated: str) -> dict:
+    refusal_phrases = ["cannot answer", "not mention", "no mention", "not provide", "does not explain", "do not possess", "based on the provided context"]
+    is_obvious_refusal = any(phrase in generated.lower() for phrase in refusal_phrases) or "error" in generated.lower()
+    
+    if is_obvious_refusal:
+        return {
+            "classification": "INCORRECT",
+            "reason": "Direct refusal or system error detected in response."
+        }
+        
+    prompt = f"""You are a strict grading assistant. Compare the student's Generated Answer against the Expected Answer (Ground Truth) for the given Question.
+
+Question: {question}
+Expected Answer: {expected}
+Generated Answer: {generated}
+
+Classify the correctness of the Generated Answer into exactly one of these categories:
+- EXACT_MATCH: The generated answer is word-for-word identical or matches perfectly in all values and meaning.
+- SUBSTANTIALLY_CORRECT: The generated answer contains all key facts/information from the expected answer, even if phrased differently or with minor extra context.
+- PARTIAL: The generated answer contains some correct facts from the expected answer but misses other critical details.
+- INCORRECT: The generated answer is factually wrong, contradicts the expected answer, or represents a model refusal.
+
+Respond ONLY with a JSON object in this format:
+{{
+  "classification": "EXACT_MATCH | SUBSTANTIALLY_CORRECT | PARTIAL | INCORRECT",
+  "reason": "One sentence explanation of why it fits this category."
+}}
+"""
+    url = f"{settings.ollama_base_url}/api/generate"
+    payload = {
+        "model": "qwen2.5:1.5b",
+        "prompt": prompt,
+        "format": "json",
+        "stream": False,
+        "options": {
+            "temperature": 0.0
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            resp_text = result.get("response", "").strip()
+            data = json.loads(resp_text)
+            classification = data.get("classification", "INCORRECT").upper()
+            reason = data.get("reason", "No reason provided by evaluator.")
+            
+            valid_cats = ["EXACT_MATCH", "SUBSTANTIALLY_CORRECT", "PARTIAL", "INCORRECT"]
+            if classification not in valid_cats:
+                for cat in valid_cats:
+                    if cat in classification:
+                        classification = cat
+                        break
+                else:
+                    classification = "INCORRECT"
+                    
+            return {
+                "classification": classification,
+                "reason": reason
+            }
+        else:
+            return {
+                "classification": "INCORRECT",
+                "reason": f"Evaluator failed with status code {response.status_code}."
+            }
+    except Exception as e:
+        return {
+            "classification": "INCORRECT",
+            "reason": f"Evaluator error: {e}"
+        }
 
 def run_benchmark():
     parser = argparse.ArgumentParser(description="Kivo Sprint 11 Automated Benchmark Runner")
@@ -228,6 +301,11 @@ def run_benchmark():
         ndcg_val = dcg / idcg if idcg > 0 else 1.0
         ndcg_sum += ndcg_val
         
+        # Correctness evaluation
+        eval_res = evaluate_generation_correctness(question, q_item["expected_answer"], answer)
+        classification = eval_res["classification"]
+        eval_reason = eval_res["reason"]
+        
         # Refusal check
         is_refusal = any(phrase in answer.lower() for phrase in refusal_phrases) or "error" in answer.lower()
         if is_refusal:
@@ -243,7 +321,9 @@ def run_benchmark():
             "parent_ids": res["parent_ids"],
             "routing_mode": routing_mode,
             "answer": answer,
-            "latency_ms": latency_ms
+            "latency_ms": latency_ms,
+            "correctness": classification,
+            "correctness_reason": eval_reason
         }
         if args.full_trace:
             trace_record["retrieved_child_chunks"] = retrieved_child_chunks
@@ -264,10 +344,19 @@ def run_benchmark():
             "precision": precision_val,
             "ndcg": ndcg_val,
             "latency_ms": latency_ms,
+            "correctness": classification,
+            "correctness_reason": eval_reason,
             "trace": trace_record
         })
         
     num_queries = len(questions)
+    
+    # Calculate final correctness metrics
+    exact_matches = sum(1 for x in eval_results if x["correctness"] == "EXACT_MATCH")
+    substantially_correct = sum(1 for x in eval_results if x["correctness"] == "SUBSTANTIALLY_CORRECT")
+    partials = sum(1 for x in eval_results if x["correctness"] == "PARTIAL")
+    incorrects = sum(1 for x in eval_results if x["correctness"] == "INCORRECT")
+    gen_accuracy = (exact_matches + substantially_correct) / num_queries
     
     # Calculate final metrics
     final_metrics = {
@@ -281,6 +370,11 @@ def run_benchmark():
         "mrr": mrr_sum / num_queries,
         "ndcg": ndcg_sum / num_queries,
         "refusal_rate": refusals / num_queries,
+        "generation_accuracy": gen_accuracy,
+        "exact_match_rate": exact_matches / num_queries,
+        "substantially_correct_rate": substantially_correct / num_queries,
+        "partial_rate": partials / num_queries,
+        "incorrect_rate": incorrects / num_queries,
         "avg_latency_ms": latency_sum / num_queries,
         "avg_length_words": length_sum / num_queries
     }
@@ -325,6 +419,11 @@ def run_benchmark():
         f"| **Recall** | {final_metrics['recall']:.2%} | - | 83.38% | {final_metrics['recall'] - 0.8338:+.2%} |",
         f"| **Precision** | {final_metrics['precision']:.2%} | - | 20.63% | {final_metrics['precision'] - 0.2063:+.2%} |",
         f"| **NDCG** | {final_metrics['ndcg']:.4f} | - | 0.8758 | {final_metrics['ndcg'] - 0.8758:+.4f} |",
+        f"| **Generation Accuracy** | {final_metrics['generation_accuracy']:.2%} | - | - | - |",
+        f"| **Exact Match Rate** | {final_metrics['exact_match_rate']:.2%} | - | - | - |",
+        f"| **Substantially Correct** | {final_metrics['substantially_correct_rate']:.2%} | - | - | - |",
+        f"| **Partial Correctness** | {final_metrics['partial_rate']:.2%} | - | - | - |",
+        f"| **Incorrect/Refusal Rate** | {final_metrics['incorrect_rate']:.2%} | - | - | - |",
         f"| **Refusal Rate** | {final_metrics['refusal_rate']:.2%} | **< 10.00%** | 21.67% | {final_metrics['refusal_rate'] - 0.2167:+.2%} |",
         f"| **Avg Latency** | {final_metrics['avg_latency_ms'] / 1000:.2f}s | - | 11.24s | {final_metrics['avg_latency_ms'] / 1000 - 11.24:+.2f}s |",
         f"| **Avg Word Count** | {final_metrics['avg_length_words']:.1f} words | - | 111.7 words | {final_metrics['avg_length_words'] - 111.7:+.1f} |",
@@ -360,6 +459,8 @@ def run_benchmark():
         report_lines.append(f"**Routing Mode**: `{item['trace']['routing_mode']}`")
         report_lines.append(f"**Recall**: {item['recall']:.2%} | **Hit@3**: {'✅ Yes' if item['is_hit_3'] else '❌ No'}")
         report_lines.append(f"**Refused**: {'⚠️ Yes' if item['is_refusal'] else '✅ No'}")
+        report_lines.append(f"**Correctness Category**: `{item['correctness']}`")
+        report_lines.append(f"**Evaluator Reason**: *{item['correctness_reason']}*")
         report_lines.append("")
         report_lines.append("#### Expected Answer:")
         report_lines.append(f"> {item['expected_answer']}")

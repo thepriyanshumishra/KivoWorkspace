@@ -137,7 +137,7 @@ def run_diagnostics():
             gt_paragraphs = q_item["gt_paragraphs"]
             
             # Intent routing
-            k = 3
+            k = 5
             if INTENT_REGEX.search(question):
                 k = 10
                 

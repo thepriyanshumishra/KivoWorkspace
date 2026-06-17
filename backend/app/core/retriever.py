@@ -25,9 +25,9 @@ def estimate_tokens(text: str) -> int:
     return int(len(text.split()) * 1.3)
 
 STANDARD_QA_PROMPT = """You are a helpful assistant. Answer the user's question based strictly on the provided context.
-If the context contains partial information, synthesize it logically and state what is missing.
-Only state that you cannot answer if the retrieved context is completely irrelevant to the topic.
-Do not make up facts. Answer in a direct and concise manner.
+If the context does not contain enough information to answer the question, state that you cannot answer based on the provided context.
+Do not make up facts or assume anything not mentioned.
+Answer in a direct and concise manner.
 
 For every factual claim you make, you MUST cite the chunk ID of the context where the information was found using the format [chunk_id] (e.g. [source_id_p0]) at the end of the sentence or statement.
 
@@ -146,7 +146,7 @@ def retrieve_and_generate(
 
     # 1. Intent Routing
     routing_mode = "STANDARD_QA"
-    k = 3
+    k = 5
     system_prompt = STANDARD_QA_PROMPT
     if INTENT_REGEX.search(question):
         routing_mode = "META_RETRIEVAL"

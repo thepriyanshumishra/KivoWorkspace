@@ -73,6 +73,49 @@ def evaluate_generation_correctness(question: str, expected: str, generated: str
             "reason": "Direct refusal or system error detected in response."
         }
         
+    def robust_json_parse(text: str) -> dict:
+        import re
+        text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Regex patterns for extraction when standard JSON parsing fails
+        p1 = r'"classification"\s*:\s*"(?P<classification>[^"]+)"\s*,\s*"reason"\s*:\s*"(?P<reason>.*)"\s*\}'
+        m1 = re.search(p1, text, re.DOTALL | re.IGNORECASE)
+        if m1:
+            return {
+                "classification": m1.group("classification").strip(),
+                "reason": m1.group("reason").strip()
+            }
+
+        p2 = r'"reason"\s*:\s*"(?P<reason>.*)"\s*,\s*"classification"\s*:\s*"(?P<classification>[^"]+)"\s*\}'
+        m2 = re.search(p2, text, re.DOTALL | re.IGNORECASE)
+        if m2:
+            return {
+                "classification": m2.group("classification").strip(),
+                "reason": m2.group("reason").strip()
+            }
+
+        class_match = re.search(r'"classification"\s*:\s*"([^"]+)"', text, re.IGNORECASE)
+        classification = class_match.group(1).strip() if class_match else "INCORRECT"
+
+        reason_match = re.search(r'"reason"\s*:\s*"(.*)"', text, re.DOTALL | re.IGNORECASE)
+        if reason_match:
+            reason = reason_match.group(1).strip()
+            if reason.endswith('}'):
+                reason = reason[:-1].strip()
+            if reason.endswith('"'):
+                reason = reason[:-1].strip()
+        else:
+            reason = "No reason provided by evaluator."
+
+        return {
+            "classification": classification,
+            "reason": reason
+        }
+
     prompt = f"""You are a strict grading assistant. Compare the student's Generated Answer against the Expected Answer (Ground Truth) for the given Question.
 
 Question: {question}
@@ -107,7 +150,7 @@ Respond ONLY with a JSON object in this format:
         if response.status_code == 200:
             result = response.json()
             resp_text = result.get("response", "").strip()
-            data = json.loads(resp_text)
+            data = robust_json_parse(resp_text)
             classification = data.get("classification", "INCORRECT").upper()
             reason = data.get("reason", "No reason provided by evaluator.")
             

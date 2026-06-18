@@ -120,6 +120,35 @@ void main() {
       expect(source.stats?['chunks'], 3);
     });
 
+    test('JSON deserialization for Email source works correctly', () {
+      final json = {
+        'id': 'test-source-email',
+        'name': 'Email: Project Update Q3',
+        'type': 'email',
+        'path': 'storage/workspaces/ws-1/sources/test-source-email_email.eml',
+        'url': null,
+        'added_at': '2026-06-16T17:08:00.000Z',
+        'size_bytes': 1024,
+        'status': 'ready',
+        'summary': 'Email from sender@example.com to recipient@example.com...',
+        'stats': {'pages': 1, 'words': 150, 'chunks': 1},
+      };
+
+      final source = Source.fromJson(json);
+
+      expect(source.id, 'test-source-email');
+      expect(source.name, 'Email: Project Update Q3');
+      expect(source.type, SourceType.email);
+      expect(source.path, 'storage/workspaces/ws-1/sources/test-source-email_email.eml');
+      expect(source.url, isNull);
+      expect(source.sizeBytes, 1024);
+      expect(source.status, SourceStatus.ready);
+      expect(source.summary, 'Email from sender@example.com to recipient@example.com...');
+      expect(source.stats?['pages'], 1);
+      expect(source.stats?['words'], 150);
+      expect(source.stats?['chunks'], 1);
+    });
+
     test('JSON deserialization for YouTube source with stats works correctly', () {
       final json = {
         'id': 'test-source-youtube-stats',

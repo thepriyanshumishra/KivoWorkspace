@@ -97,45 +97,81 @@ class YouTubeProcessor:
         
         # --- PHASE 1: Attempt Subtitle Fetch ---
         temp_sub_template = sources_dir / f"{source_id}_sub_temp"
-        ydl_opts_subs = {
-            'skip_download': True,        # Do not download video/audio
-            'writesubtitles': True,       # Write manual subtitles
-            'writeautomaticsubtitles': True,  # Fallback to auto-generated subtitles
-            'subtitlesformat': 'vtt',
-            'subtitleslangs': ['en', 'hi', 'pa', 'auto'], # Prioritize English, Hindi, Punjabi, or Auto
-            'outtmpl': str(temp_sub_template),
-            'quiet': True,
-            'no_warnings': True,
-        }
         
         try:
-            logger.info("Attempting to download subtitles metadata...")
-            with yt_dlp.YoutubeDL(ydl_opts_subs) as ydl:
-                info_dict = ydl.extract_info(url, download=True)
+            logger.info("Extracting YouTube video metadata to check for subtitles...")
+            ydl_opts_info = {
+                'skip_download': True,
+                'quiet': True,
+                'no_warnings': True,
+            }
+            available_langs = set()
+            with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+                info_dict = ydl.extract_info(url, download=False)
                 video_title = info_dict.get('title', video_title)
                 duration = float(info_dict.get('duration') or 0.0)
                 
-            # Locate downloaded subtitle file
-            downloaded_files = glob.glob(str(sources_dir / f"{source_id}_sub_temp*"))
-            vtt_files = [f for f in downloaded_files if f.endswith(".vtt")]
+                # Check manual subtitles
+                subs = info_dict.get('subtitles', {}) or {}
+                # Check auto-generated subtitles
+                auto_subs = info_dict.get('automatic_captions', {}) or {}
+                
+                available_langs.update(subs.keys())
+                available_langs.update(auto_subs.keys())
             
-            if vtt_files:
-                vtt_file = Path(vtt_files[0])
-                try:
-                    with open(vtt_file, "r", encoding="utf-8") as f:
-                        vtt_content = f.read()
-                    segments = clean_vtt_timestamps(vtt_content)
-                    if segments:
-                        subs_downloaded = True
-                        logger.info(f"Successfully fetched {len(segments)} subtitle segments for YouTube video: '{video_title}'")
-                except Exception as parse_err:
-                    logger.error(f"Error parsing VTT subtitles: {parse_err}")
-                finally:
-                    # Clean up the downloaded subtitle file
+            logger.info(f"Available subtitle languages for '{video_title}': {available_langs}")
+            
+            # Select the best available language
+            preferred_langs = ['en', 'hi', 'pa']
+            selected_lang = None
+            for lang in preferred_langs:
+                if lang in available_langs:
+                    selected_lang = lang
+                    break
+            
+            # If none of the preferred are available, but other languages exist, grab the first one
+            if not selected_lang and available_langs:
+                selected_lang = list(available_langs)[0]
+                
+            if selected_lang:
+                logger.info(f"Downloading subtitle language: '{selected_lang}'...")
+                ydl_opts_subs = {
+                    'skip_download': True,        # Do not download video/audio
+                    'writesubtitles': True,       # Write manual subtitles
+                    'writeautomaticsub': True,    # Fallback to auto-generated subtitles
+                    'subtitlesformat': 'vtt',
+                    'subtitleslangs': [selected_lang], # Download ONLY the selected language
+                    'outtmpl': str(temp_sub_template),
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts_subs) as ydl:
+                    ydl.download([url])
+                    
+                # Locate downloaded subtitle file
+                downloaded_files = glob.glob(str(sources_dir / f"{source_id}_sub_temp*"))
+                vtt_files = [f for f in downloaded_files if f.endswith(".vtt")]
+                
+                if vtt_files:
+                    vtt_file = Path(vtt_files[0])
                     try:
-                        vtt_file.unlink()
-                    except Exception as del_err:
-                        logger.error(f"Failed to delete temp subtitle file {vtt_file}: {del_err}")
+                        with open(vtt_file, "r", encoding="utf-8") as f:
+                            vtt_content = f.read()
+                        segments = clean_vtt_timestamps(vtt_content)
+                        if segments:
+                            subs_downloaded = True
+                            logger.info(f"Successfully fetched {len(segments)} subtitle segments for YouTube video: '{video_title}'")
+                    except Exception as parse_err:
+                        logger.error(f"Error parsing VTT subtitles: {parse_err}")
+                    finally:
+                        # Clean up the downloaded subtitle file
+                        try:
+                            vtt_file.unlink()
+                        except Exception as del_err:
+                            logger.error(f"Failed to delete temp subtitle file {vtt_file}: {del_err}")
+            else:
+                logger.info("No subtitles or automatic captions available for this video.")
         except Exception as sub_err:
             logger.warning(f"Could not retrieve subtitles from YouTube: {sub_err}")
             

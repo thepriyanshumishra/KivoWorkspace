@@ -8,7 +8,7 @@ from typing import Optional
 
 class SourceBase(BaseModel):
     name: str = Field(..., description="Name of the source file, video title, or website title")
-    type: str = Field(..., description="Type of source (pdf, image, audio, youtube, website, text)")
+    type: str = Field(..., description="Type of source (pdf, image, audio, youtube, website, text, email)")
 
 class YouTubeCreate(BaseModel):
     url: str = Field(..., description="YouTube video URL")
@@ -19,6 +19,12 @@ class WebsiteCreate(BaseModel):
 class TextCreate(BaseModel):
     name: str = Field(..., description="Name for the copied text source")
     content: str = Field(..., description="Raw text content to ingest")
+
+class EmailCreate(BaseModel):
+    subject: str = Field(..., description="Subject of the email")
+    sender: str = Field(..., description="Sender/From of the email")
+    recipient: str = Field(..., description="Recipient/To of the email")
+    body: str = Field(..., description="Body text content of the email")
 
 class Source(SourceBase):
     id: str = Field(..., description="Unique source identifier")

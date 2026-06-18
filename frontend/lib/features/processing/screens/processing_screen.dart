@@ -1,782 +1,420 @@
-// features/processing/screens/processing_screen.dart
-// Purpose: Processing screen showing real-time source ingestion progress timeline.
-// Responsibilities: Polls processing status, renders dynamic progress bar, handles cancellation, auto-redirects on completion.
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/router/app_router.dart';
-import '../../source_upload/models/source.dart';
 import '../../source_upload/providers/source_providers.dart';
 import '../../workspace/providers/workspace_providers.dart';
 import '../models/processing_status.dart';
 import '../providers/processing_providers.dart';
-import '../services/processing_service.dart';
 
-class HorizontalStep {
-  final String id;
-  final String label;
-  final IconData icon;
-  final List<String> backendSteps;
-
-  HorizontalStep({
-    required this.id,
-    required this.label,
-    required this.icon,
-    required this.backendSteps,
-  });
-}
-
-class ProcessingScreen extends ConsumerWidget {
+class ProcessingScreen extends ConsumerStatefulWidget {
   final String workspaceId;
 
   const ProcessingScreen({super.key, required this.workspaceId});
 
-  String _getStepLabel(String stepKey) {
-    switch (stepKey) {
-      case 'pdf_extraction':
-        return 'PDF Extraction';
-      case 'image_ocr':
-        return 'Image OCR';
-      case 'audio_transcription':
-        return 'Audio Transcription';
-      case 'youtube_transcription':
-        return 'YouTube Transcription';
-      case 'website_extraction':
-        return 'Website Text Extraction';
-      case 'text_extraction':
-        return 'Pasted Text Processing';
-      case 'embedding_generation':
-        return 'Embedding Generation';
-      case 'building_knowledge_base':
-        return 'Building Knowledge Base';
-      default:
-        return stepKey;
-    }
+  @override
+  ConsumerState<ProcessingScreen> createState() => _ProcessingScreenState();
+}
+
+class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
+  Timer? _timer;
+  String? _lastStep;
+  int _secondsRemaining = 0;
+
+  static const Map<String, int> _stepDurations = {
+    'pdf_extraction': 10,
+    'image_ocr': 15,
+    'audio_transcription': 45,
+    'youtube_transcription': 30,
+    'website_extraction': 12,
+    'text_extraction': 4,
+    'email_extraction': 4,
+    'embedding_generation': 20,
+    'building_knowledge_base': 8,
+  };
+
+  static const Map<String, String> _stepTitles = {
+    'pdf_extraction': 'PDF Text Extraction',
+    'image_ocr': 'Image OCR Processing',
+    'audio_transcription': 'Audio Transcription (Whisper)',
+    'youtube_transcription': 'YouTube Video Ingestion',
+    'website_extraction': 'Website Link Extraction',
+    'text_extraction': 'Plain Text Parsing',
+    'email_extraction': 'Email Message Ingestion',
+    'embedding_generation': 'Generating Search Embeddings',
+    'building_knowledge_base': 'Compiling Knowledge Base',
+  };
+
+  static const Map<String, String> _stepDescriptions = {
+    'pdf_extraction': 'Extracting layout text from PDFs...',
+    'image_ocr': 'Running Tesseract OCR on images...',
+    'audio_transcription': 'Transcribing audio track using Whisper...',
+    'youtube_transcription': 'Fetching YouTube video audio and text...',
+    'website_extraction': 'Extracting structured content from webpage...',
+    'text_extraction': 'Importing plain text content...',
+    'email_extraction': 'Parsing email message headers and body...',
+    'embedding_generation': 'Vectorizing chunks using SentenceTransformers...',
+    'building_knowledge_base': 'Indexing vectors into SQLite & FAISS...',
+  };
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
-  String getHorizontalStepStatus(HorizontalStep step, ProcessingStatus status) {
-    if (status.isReady) return 'done';
-
-    // Check if all backend steps are completed
-    final allCompleted = step.backendSteps.every((bs) => status.completedSteps.contains(bs));
-    if (allCompleted) return 'done';
-
-    // Check if any of its backend steps is current
-    if (step.backendSteps.contains(status.currentStep)) {
-      if (status.isFailed || status.isCancelled) return 'failed';
-      return 'active';
-    }
-
-    // If the pipeline is past this step
-    if (status.currentStep != null && status.steps.contains(status.currentStep)) {
-      final currentIdx = status.steps.indexOf(status.currentStep!);
-      int maxStepIdx = -1;
-      for (final bs in step.backendSteps) {
-        final idx = status.steps.indexOf(bs);
-        if (idx > maxStepIdx) maxStepIdx = idx;
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
       }
-      if (maxStepIdx != -1 && currentIdx > maxStepIdx) {
-        return 'done';
+      if (_secondsRemaining > 1) {
+        setState(() {
+          _secondsRemaining--;
+        });
+      } else {
+        timer.cancel();
       }
-    }
-
-    return 'pending';
-  }
-
-  List<String> getSubStepsForHorizontalStep(String stepId) {
-    switch (stepId) {
-      case 'pdf':
-        return [
-          'Extracting text page-by-page',
-          'Structuring paragraphs and layouts',
-          'Generating parent-child text chunks',
-        ];
-      case 'image':
-        return [
-          'Preprocessing image files',
-          'Running Optical Character Recognition (OCR)',
-          'Chunking extracted text',
-        ];
-      case 'audio':
-        return [
-          'Decompressing audio track',
-          'Executing Whisper Speech-to-Text model',
-          'Generating time-stamped text chunks',
-        ];
-      case 'youtube':
-        return [
-          'Fetching video info and downloading audio stream',
-          'Running Whisper Speech-to-Text model',
-          'Generating time-stamped text chunks',
-        ];
-      case 'website':
-        return [
-          'Fetching URL content',
-          'Cleaning HTML tags and navigation text',
-          'Chunking article main text',
-        ];
-      case 'text':
-        return [
-          'Loading pasted text',
-          'Chunking text boundaries',
-        ];
-      case 'knowledge_base':
-        return [
-          'Generating high-dimensional vectors (GTE model)',
-          'Indexing vectors using FAISS',
-          'Compiling chunk mappings & database metadata',
-        ];
-      default:
-        return [];
-     }
-  }
-
-  String getSubStepStatus(String stepId, int index, String? currentBackendStep, ProcessingStatus status) {
-    if (status.isReady) return 'done';
-
-    if (stepId == 'knowledge_base') {
-      if (currentBackendStep == 'embedding_generation') {
-        if (index == 0) return 'active';
-        return 'pending';
-      } else if (currentBackendStep == 'building_knowledge_base') {
-        if (index == 0) return 'done';
-        if (index == 1) return 'active';
-        return 'pending';
-      }
-    }
-
-    // Default simulation for active step
-    if (index == 0) return 'done';
-    if (index == 1) return 'active';
-    return 'pending';
-  }
-
-  Future<void> _cancelProcessing(BuildContext context, WidgetRef ref) async {
-    try {
-      await ref.read(processingServiceProvider).cancelProcessing(workspaceId);
-      if (context.mounted) {
-        context.pop(); // Go back to Upload screen
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to cancel: ${e.toString()}'),
-            backgroundColor: context.colors.statusFailed,
-          ),
-        );
-      }
-    }
+    });
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final colors = context.colors;
-    final statusState = ref.watch(processingStatusProvider(workspaceId));
-    final sourcesState = ref.watch(sourcesProvider(workspaceId));
+    final statusState = ref.watch(processingStatusProvider(widget.workspaceId));
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final workspaceState = ref.watch(activeWorkspaceProvider(widget.workspaceId));
+    final workspaceName = workspaceState.maybeWhen(data: (w) => w.name, orElse: () => 'Workspace');
 
-    // Listen for completion to auto-navigate back
-    ref.listen<AsyncValue<ProcessingStatus>>(processingStatusProvider(workspaceId), (prev, next) {
+    // Listen for completion to reload workspace and redirect
+    ref.listen<AsyncValue<ProcessingStatus>>(processingStatusProvider(widget.workspaceId), (prev, next) {
       next.whenData((data) {
         if (data.isReady) {
-          // Invalidate dependencies to reload fresh counts/lists
-          ref.invalidate(sourcesProvider(workspaceId));
+          ref.invalidate(sourcesProvider(widget.workspaceId));
           ref.read(workspacesProvider.notifier).loadWorkspaces();
-
-          // Auto route to workspace detail view
-          if (context.mounted) {
-            context.go(AppRoutes.workspace.replaceAll(':workspaceId', workspaceId));
-          }
+          _timer?.cancel();
+          _timer = null;
+          
+          // Automatically redirect to the chat screen
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              context.go(AppRoutes.workspace.replaceAll(':workspaceId', widget.workspaceId));
+            }
+          });
         }
       });
     });
 
     return Scaffold(
+      backgroundColor: colors.background,
       appBar: AppBar(
-        title: const Text('Processing Sources'),
-        automaticallyImplyLeading: false,
-        actions: [
-          statusState.maybeWhen(
-            data: (status) {
-              final isProcessing = status.isProcessing;
-              return TextButton(
-                onPressed: isProcessing ? () => _cancelProcessing(context, ref) : null,
-                style: TextButton.styleFrom(
-                  foregroundColor: colors.statusFailed,
-                  disabledForegroundColor: colors.textMuted,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                child: const Text('Cancel Processing'),
-              );
-            },
-            orElse: () => const SizedBox.shrink(),
-          ),
-          const SizedBox(width: 16),
-        ],
+        backgroundColor: colors.background,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded, size: 18, color: colors.textSecondary),
+          tooltip: 'Dashboard',
+          onPressed: () => context.go('/'),
+        ),
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: () => context.go('/'),
+              child: Text('Dashboard', style: TextStyle(fontSize: 13, color: colors.textSecondary)),
+            ),
+            Icon(Icons.chevron_right, size: 16, color: colors.textMuted),
+            Text(workspaceName, style: TextStyle(fontSize: 13, color: colors.textSecondary)),
+            Icon(Icons.chevron_right, size: 16, color: colors.textMuted),
+            Text('Indexing', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.textPrimary)),
+          ],
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: colors.divider),
+        ),
       ),
       body: statusState.when(
         loading: () => const Center(child: CircularProgressIndicator.adaptive()),
         error: (error, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline_rounded, size: 48, color: colors.statusFailed),
-                const SizedBox(height: 16),
-                Text('Failed to query status', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text(
-                  error.toString(),
-                  style: TextStyle(color: colors.textSecondary),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        if (context.canPop()) {
-                          context.pop();
-                        } else {
-                          context.go('/');
-                        }
-                      },
-                      icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                      label: const Text('Go Back'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: colors.textSecondary,
-                        side: BorderSide(color: colors.border),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    ElevatedButton.icon(
-                      onPressed: () => ref.invalidate(processingStatusProvider(workspaceId)),
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Retry Connection'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: colors.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 40, color: colors.statusFailed),
+              const SizedBox(height: 16),
+              Text('Error loading processing pipeline', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(error.toString(), style: TextStyle(color: colors.textSecondary)),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () => ref.invalidate(processingStatusProvider(widget.workspaceId)),
+                child: const Text('Retry'),
+              ),
+            ],
           ),
         ),
         data: (status) {
-          final sources = sourcesState.maybeWhen(
-            data: (list) => list,
-            orElse: () => <Source>[],
-          );
-
-          // 1. Identify which source types exist to build horizontal timeline dynamically
-          final hasPdf = sources.any((s) => s.type == SourceType.pdf);
-          final hasImage = sources.any((s) => s.type == SourceType.image);
-          final hasAudio = sources.any((s) => s.type == SourceType.audio);
-          final hasYouTube = sources.any((s) => s.type == SourceType.youtube);
-          final hasWebsite = sources.any((s) => s.type == SourceType.website);
-          final hasText = sources.any((s) => s.type == SourceType.text);
-
-          final horizontalSteps = <HorizontalStep>[];
-          if (hasPdf) {
-            horizontalSteps.add(HorizontalStep(
-              id: 'pdf',
-              label: 'PDFs',
-              icon: Icons.picture_as_pdf_rounded,
-              backendSteps: ['pdf_extraction'],
-            ));
-          }
-          if (hasImage) {
-            horizontalSteps.add(HorizontalStep(
-              id: 'image',
-              label: 'Images',
-              icon: Icons.image_rounded,
-              backendSteps: ['image_ocr'],
-            ));
-          }
-          if (hasAudio) {
-            horizontalSteps.add(HorizontalStep(
-              id: 'audio',
-              label: 'Audios',
-              icon: Icons.audiotrack_rounded,
-              backendSteps: ['audio_transcription'],
-            ));
-          }
-          if (hasYouTube) {
-            horizontalSteps.add(HorizontalStep(
-              id: 'youtube',
-              label: 'YouTube',
-              icon: Icons.video_library_rounded,
-              backendSteps: ['youtube_transcription'],
-            ));
-          }
-          if (hasWebsite) {
-            horizontalSteps.add(HorizontalStep(
-              id: 'website',
-              label: 'Websites',
-              icon: Icons.language_rounded,
-              backendSteps: ['website_extraction'],
-            ));
-          }
-          if (hasText) {
-            horizontalSteps.add(HorizontalStep(
-              id: 'text',
-              label: 'Texts',
-              icon: Icons.article_rounded,
-              backendSteps: ['text_extraction'],
-            ));
-          }
-          // Always include Knowledge Base
-          horizontalSteps.add(HorizontalStep(
-            id: 'knowledge_base',
-            label: 'Knowledge Base',
-            icon: Icons.hub_rounded,
-            backendSteps: ['embedding_generation', 'building_knowledge_base'],
-          ));
-
-          // 2. Identify active horizontal step
-          HorizontalStep? activeHorizontalStep;
-          for (final step in horizontalSteps) {
-            if (getHorizontalStepStatus(step, status) == 'active') {
-              activeHorizontalStep = step;
-              break;
-            }
-          }
-          // Fallbacks for display
-          if (activeHorizontalStep == null) {
-            if (status.isReady && horizontalSteps.isNotEmpty) {
-              activeHorizontalStep = horizontalSteps.last;
-            } else if (status.isProcessing && horizontalSteps.isNotEmpty) {
-              for (final step in horizontalSteps) {
-                if (getHorizontalStepStatus(step, status) == 'pending') {
-                  activeHorizontalStep = step;
-                  break;
-                }
-              }
-              activeHorizontalStep ??= horizontalSteps.first;
-            }
-          }
-
-          // 3. Extract sub-steps for current horizontal step
-          final subSteps = activeHorizontalStep != null
-              ? getSubStepsForHorizontalStep(activeHorizontalStep.id)
-              : <String>[];
-
-          // 4. Time remaining estimation logic
-          int numPdfs = 0;
-          int numImages = 0;
-          int numAudios = 0;
-          int numYouTubes = 0;
-          int numWebsites = 0;
-          int numTexts = 0;
-
-          for (final src in sources) {
-            switch (src.type) {
-              case SourceType.pdf:
-                numPdfs++;
-                break;
-              case SourceType.image:
-                numImages++;
-                break;
-              case SourceType.audio:
-                numAudios++;
-                break;
-              case SourceType.youtube:
-                numYouTubes++;
-                break;
-              case SourceType.website:
-                numWebsites++;
-                break;
-              case SourceType.text:
-                numTexts++;
-                break;
-            }
-          }
-
-          final int totalEstimatedSeconds = (numPdfs * 4) +
-              (numImages * 3) +
-              (numAudios * 12) +
-              (numYouTubes * 15) +
-              (numWebsites * 3) +
-              (numTexts * 1) +
-              5; // Base 5s for Knowledge Base
-
-          final int remainingSeconds = (totalEstimatedSeconds * (1.0 - status.progress)).round();
-
-          String remainingText = '';
-          if (status.isReady) {
-            remainingText = 'Completed!';
-          } else if (remainingSeconds <= 0) {
-            remainingText = 'Almost done...';
-          } else {
-            remainingText = 'Estimated time remaining: ${remainingSeconds}s';
-          }
-
-          String progressMessage = 'Initializing pipeline...';
-          if (status.isProcessing && status.currentStep != null) {
-            progressMessage = 'Executing: ${_getStepLabel(status.currentStep!)}';
-          } else if (status.isReady) {
-            progressMessage = 'Knowledge base built successfully! Redirecting...';
-          } else if (status.isCancelled) {
-            progressMessage = 'Processing cancelled.';
-          } else if (status.isFailed) {
-            progressMessage = 'Processing failed.';
-          }
-
           final int progressPercent = (status.progress * 100).round();
+          final isReady = status.isReady;
+
+          // Manage the countdown timer on change of step
+          if (status.currentStep != null && status.currentStep != _lastStep) {
+            _lastStep = status.currentStep;
+            _secondsRemaining = _stepDurations[status.currentStep] ?? 10;
+            _startTimer();
+          }
 
           return Center(
             child: SingleChildScrollView(
-              child: ConstrainedBox(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+              child: Container(
                 constraints: const BoxConstraints(maxWidth: 580),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 32),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // --- Status Header ---
-                      Text(
-                        'Building Knowledge Base',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF202020) : Colors.white,
+                  border: Border.all(color: colors.border, width: 1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Pipeline Header
+                    Center(
+                      child: Column(
+                        children: [
+                          Text(
+                            'Processing Pipeline',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
                               color: colors.textPrimary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 22,
                               letterSpacing: -0.3,
                             ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Your sources are being processed. This may take a few minutes.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: colors.textSecondary,
-                              fontSize: 13.5,
-                            ),
-                      ),
-                      const SizedBox(height: 32),
-
-                      // --- Horizontal Progress Bar (Timeline) ---
-                      if (horizontalSteps.isNotEmpty) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-                          decoration: BoxDecoration(
-                            color: colors.surfaceElevated,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: colors.border),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: List.generate(horizontalSteps.length * 2 - 1, (index) {
-                              if (index.isOdd) {
-                                // Connector Line
-                                final stepIdx = index ~/ 2;
-                                final leftStepStatus = getHorizontalStepStatus(horizontalSteps[stepIdx], status);
-                                final rightStepStatus = getHorizontalStepStatus(horizontalSteps[stepIdx + 1], status);
-
-                                Color lineColor = colors.border;
-                                if (leftStepStatus == 'done') {
-                                  if (rightStepStatus == 'done' || rightStepStatus == 'active') {
-                                    lineColor = colors.primary;
-                                  } else {
-                                    lineColor = colors.primary.withValues(alpha: 0.4);
-                                  }
-                                }
-
-                                return Expanded(
-                                  child: Container(
-                                    height: 3,
-                                    color: lineColor,
-                                  ),
-                                );
-                              } else {
-                                // Step Node
-                                final stepIdx = index ~/ 2;
-                                final step = horizontalSteps[stepIdx];
-                                final stepStatus = getHorizontalStepStatus(step, status);
-
-                                Color nodeBgColor;
-                                Color iconColor;
-                                Border? border;
-
-                                switch (stepStatus) {
-                                  case 'done':
-                                    nodeBgColor = colors.statusReady;
-                                    iconColor = Colors.white;
-                                    break;
-                                  case 'active':
-                                    nodeBgColor = colors.primary;
-                                    iconColor = Colors.white;
-                                    break;
-                                  case 'failed':
-                                    nodeBgColor = colors.statusFailed;
-                                    iconColor = Colors.white;
-                                    break;
-                                  case 'pending':
-                                  default:
-                                    nodeBgColor = Colors.transparent;
-                                    iconColor = colors.textMuted;
-                                    border = Border.all(color: colors.border, width: 2);
-                                    break;
-                                }
-
-                                return Tooltip(
-                                  message: step.label,
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: nodeBgColor,
-                                          border: border,
-                                          boxShadow: stepStatus == 'active'
-                                              ? [
-                                                  BoxShadow(
-                                                    color: colors.primary.withValues(alpha: 0.3),
-                                                    blurRadius: 8,
-                                                    spreadRadius: 2,
-                                                  )
-                                                ]
-                                              : null,
-                                        ),
-                                        child: Center(
-                                          child: stepStatus == 'active'
-                                              ? Stack(
-                                                  alignment: Alignment.center,
-                                                  children: [
-                                                    const SizedBox(
-                                                      width: 28,
-                                                      height: 28,
-                                                      child: CircularProgressIndicator(
-                                                        strokeWidth: 2.5,
-                                                        valueColor: AlwaysStoppedAnimation(Colors.white),
-                                                      ),
-                                                    ),
-                                                    Icon(step.icon, color: iconColor, size: 16),
-                                                  ],
-                                                )
-                                              : Icon(
-                                                  stepStatus == 'done' ? Icons.check_rounded : step.icon,
-                                                  color: iconColor,
-                                                  size: 18,
-                                                ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        step.label,
-                                        style: TextStyle(
-                                          color: stepStatus == 'active'
-                                              ? colors.primary
-                                              : (stepStatus == 'done' ? colors.textPrimary : colors.textMuted),
-                                          fontWeight: stepStatus == 'active' ? FontWeight.w600 : FontWeight.normal,
-                                          fontSize: 11.5,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }
-                            }),
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-                      ],
-
-                      // --- Progress bar / Linear Progress Indicator ---
-                      LinearProgressIndicator(
-                        value: status.progress,
-                        backgroundColor: colors.surfaceElevated,
-                        valueColor: AlwaysStoppedAnimation(colors.primary),
-                        borderRadius: BorderRadius.circular(8),
-                        minHeight: 8,
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              progressMessage,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: colors.textSecondary,
-                                    fontSize: 12.5,
-                                  ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
+                          const SizedBox(height: 4),
                           Text(
-                            '$progressPercent% • $remainingText',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: colors.primary,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12.5,
-                                ),
+                            isReady 
+                                ? 'Knowledge base compiled and ready!' 
+                                : 'Background processing is active. You can safely navigate away.',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              color: colors.textSecondary,
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 32),
+                    ),
+                    const SizedBox(height: 28),
 
-                      // --- Active Vertical checklist ---
-                      if (activeHorizontalStep != null && subSteps.isNotEmpty) ...[
-                        Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: colors.surface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: colors.border),
+                    // Overall Progress Block
+                    Row(
+                      children: [
+                        Text(
+                          'Overall Progress',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontFamily: 'IBM Plex Mono',
+                            fontWeight: FontWeight.w700,
+                            color: colors.primary,
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(activeHorizontalStep.icon, color: colors.primary, size: 20),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Currently: ${activeHorizontalStep.label}',
-                                    style: TextStyle(
-                                      color: colors.textPrimary,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 15.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const Divider(height: 32),
-                              ...List.generate(subSteps.length, (idx) {
-                                final subLabel = subSteps[idx];
-                                final subStatus = getSubStepStatus(
-                                  activeHorizontalStep!.id,
-                                  idx,
-                                  status.currentStep,
-                                  status,
-                                );
-
-                                Color labelColor;
-                                Widget iconWidget;
-
-                                switch (subStatus) {
-                                  case 'done':
-                                    labelColor = colors.textPrimary;
-                                    iconWidget = Icon(Icons.check_circle_rounded, color: colors.statusReady, size: 18);
-                                    break;
-                                  case 'active':
-                                    labelColor = colors.primary;
-                                    iconWidget = SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation(colors.primary),
-                                      ),
-                                    );
-                                    break;
-                                  case 'pending':
-                                  default:
-                                    labelColor = colors.textMuted;
-                                    iconWidget = Container(
-                                      width: 18,
-                                      height: 18,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(color: colors.border, width: 1.5),
-                                      ),
-                                    );
-                                    break;
-                                }
-
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 8),
-                                  child: Row(
-                                    children: [
-                                      iconWidget,
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: Text(
-                                          subLabel,
-                                          style: TextStyle(
-                                            color: labelColor,
-                                            fontWeight: subStatus == 'active' ? FontWeight.w600 : FontWeight.normal,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }),
-                            ],
+                        ),
+                        const Spacer(),
+                        Text(
+                          '$progressPercent%',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontFamily: 'IBM Plex Mono',
+                            fontWeight: FontWeight.w700,
+                            color: colors.primary,
                           ),
                         ),
                       ],
-                      const SizedBox(height: 32),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: colors.statusReadyBg,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: colors.statusReady.withValues(alpha: 0.2)),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.info_outline_rounded, color: colors.statusReady, size: 16),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Workspace indexing runs in the background. You can safely navigate away.',
-                                style: TextStyle(
-                                  color: colors.textPrimary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: status.progress,
+                        minHeight: 6,
+                        backgroundColor: isDark ? const Color(0xFF191919) : const Color(0xFFF1F1EF),
+                        valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
                       ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => context.go(AppRoutes.home),
-                              icon: const Icon(Icons.home_outlined, size: 16),
-                              label: const Text('Back to Dashboard'),
+                    ),
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const SizedBox(height: 16),
+
+                    // STAGES
+                    Text(
+                      'PIPELINE STAGES',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'IBM Plex Mono',
+                        fontWeight: FontWeight.w600,
+                        color: colors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Render dynamic stages from status.steps
+                    if (status.steps.isEmpty)
+                      Text(
+                        'No processing steps queued.',
+                        style: TextStyle(fontSize: 13, color: colors.textSecondary, fontStyle: FontStyle.italic),
+                      )
+                    else
+                      Column(
+                        children: status.steps.map((step) {
+                          final isCompleted = status.completedSteps.contains(step);
+                          final isActive = !isCompleted && status.currentStep == step;
+                          
+                          // Determine user friendly texts
+                          final title = _stepTitles[step] ?? step;
+                          final description = _stepDescriptions[step] ?? '';
+                          
+                          IconData iconData;
+                          Color iconColor;
+                          String subtitle;
+
+                          if (isCompleted) {
+                            iconData = Icons.check_circle_rounded;
+                            iconColor = colors.statusReady;
+                            subtitle = 'Completed';
+                          } else if (isActive) {
+                            iconData = Icons.sync;
+                            iconColor = Colors.orange;
+                            subtitle = '$description (~${_secondsRemaining}s remaining)';
+                          } else {
+                            iconData = Icons.radio_button_unchecked_rounded;
+                            iconColor = colors.textMuted;
+                            subtitle = 'Waiting in queue...';
+                          }
+
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _buildStageCard(
+                              context: context,
+                              icon: iconData,
+                              iconColor: iconColor,
+                              title: title,
+                              subtitle: subtitle,
+                              isActive: isActive,
+                              isCompleted: isCompleted,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const SizedBox(height: 20),
+
+                    // Action Buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => context.go('/'),
+                            icon: const Icon(Icons.dashboard_outlined, size: 14),
+                            label: const Text('Back to Dashboard'),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: colors.border),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: () => context.go(
-                                AppRoutes.workspace.replaceAll(':workspaceId', workspaceId),
-                              ),
-                              icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
-                              label: const Text('Open Chat Workspace'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: colors.primary,
-                                foregroundColor: Colors.white,
-                              ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              context.go(AppRoutes.workspace.replaceAll(':workspaceId', widget.workspaceId));
+                            },
+                            icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
+                            label: const Text('Open Chat Workspace'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: colors.primary,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildStageCard({
+    required BuildContext context,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required bool isActive,
+    required bool isCompleted,
+  }) {
+    final colors = context.colors;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    Color bg;
+    Border border;
+
+    if (isActive) {
+      bg = isDark ? const Color(0xFF1B2A32) : const Color(0xFFE7F3F8);
+      border = Border.all(color: colors.primary.withValues(alpha: 0.5), width: 1.5);
+    } else if (isCompleted) {
+      bg = isDark ? const Color(0xFF222822) : const Color(0xFFEDF3EC);
+      border = Border.all(color: colors.border);
+    } else {
+      bg = Colors.transparent;
+      border = Border.all(color: colors.border, style: BorderStyle.solid);
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        border: border,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 16),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isCompleted ? colors.textPrimary : (isActive ? colors.primary : colors.textSecondary),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: isCompleted ? colors.textSecondary : colors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

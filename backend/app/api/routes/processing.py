@@ -183,6 +183,23 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                         except Exception as e:
                             logger.error(f"Failed to process Text source {src.id}: {e}")
                             src.status = "failed"
+            elif step == "email_extraction":
+                from app.core.processors.email import EmailProcessor
+                processor = EmailProcessor()
+                for src in sources:
+                    if src.type == "email" and src.status == "processing":
+                        if cancel_event.is_set():
+                            logger.info(f"Cancellation requested during Email processing. Stopping thread for {workspace_id}")
+                            return
+                        try:
+                            file_path = FilePath(src.path) if src.path else None
+                            if file_path and file_path.exists():
+                                res = processor.process(file_path, workspace_id, src.id)
+                                src.stats = res["stats"]
+                                src.summary = res["summary"]
+                        except Exception as e:
+                            logger.error(f"Failed to process Email source {src.id}: {e}")
+                            src.status = "failed"
             elif step == "embedding_generation":
                 from app.core.processors.embeddings import EmbeddingProcessor
                 processor = EmbeddingProcessor()
@@ -272,6 +289,7 @@ def start_processing(workspace_id: str = Path(..., description="The unique works
     has_youtube = any(s.type == "youtube" for s in sources)
     has_website = any(s.type == "website" for s in sources)
     has_text = any(s.type == "text" for s in sources)
+    has_email = any(s.type == "email" for s in sources)
     
     if has_pdf:
         steps.append("pdf_extraction")
@@ -285,6 +303,8 @@ def start_processing(workspace_id: str = Path(..., description="The unique works
         steps.append("website_extraction")
     if has_text:
         steps.append("text_extraction")
+    if has_email:
+        steps.append("email_extraction")
         
     # Always include embeddings and base indexing steps
     steps.extend(["embedding_generation", "building_knowledge_base"])

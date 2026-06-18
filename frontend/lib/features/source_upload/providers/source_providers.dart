@@ -99,4 +99,17 @@ class SourcesNotifier extends StateNotifier<AsyncValue<List<Source>>> {
       rethrow;
     }
   }
+
+  Future<void> addCopiedEmail(String subject, String sender, String recipient, String body) async {
+    try {
+      final newSource = await _service.addCopiedEmail(_workspaceId, subject, sender, recipient, body);
+      state.whenData((currentList) {
+        state = AsyncValue.data([...currentList, newSource]);
+      });
+      // Refresh workspaces list to update sources_count on home screen
+      _ref.read(workspacesProvider.notifier).loadWorkspaces();
+    } catch (e) {
+      rethrow;
+    }
+  }
 }

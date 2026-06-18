@@ -14,7 +14,7 @@ from typing import List
 
 from urllib.parse import urlparse
 from app.core.config import settings
-from app.models.source import Source, YouTubeCreate, WebsiteCreate, TextCreate
+from app.models.source import Source, YouTubeCreate, WebsiteCreate, TextCreate, EmailCreate
 from app.api.routes.workspaces import get_workspace_dir, get_metadata_path
 from app.models.workspace import Workspace
 
@@ -103,6 +103,8 @@ async def upload_sources(
             source_type = "image"
         elif ext in [".mp3", ".wav", ".m4a", ".flac", ".ogg"]:
             source_type = "audio"
+        elif ext in [".eml", ".msg"]:
+            source_type = "email"
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file format for {file.filename}")
             
@@ -285,6 +287,62 @@ def add_text_source(
     update_workspace_sources_count(workspace_id, len(current_sources))
     
     logger.info(f"Registered copied text source {name} in workspace {workspace_id}")
+    return src
+
+@router.post("/email", response_model=Source)
+def add_email_source(
+    workspace_id: str = Path(..., description="The unique workspace ID"),
+    payload: EmailCreate = Body(...)
+):
+    """Add pasted email content as a source for the workspace."""
+    workspace_dir = get_workspace_dir(workspace_id)
+    if not workspace_dir.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    subject = payload.subject.strip()
+    if not subject:
+        subject = "Untitled Email"
+        
+    # Standardize name extension
+    name = f"Email: {subject}"
+    if not name.endswith(".eml"):
+        name = f"{name}.eml"
+        
+    upload_dir = get_sources_upload_dir(workspace_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    source_id = str(uuid.uuid4())
+    filename = f"{source_id}_email.eml"
+    dest_path = upload_dir / filename
+    
+    # Save formatted email text to disk so the EmailProcessor can parse it just like a regular EML file
+    email_content = f"From: {payload.sender}\nTo: {payload.recipient}\nSubject: {payload.subject}\n\n{payload.body}"
+    try:
+        with open(dest_path, "w", encoding="utf-8") as f:
+            f.write(email_content)
+    except Exception as e:
+        logger.error(f"Failed to write email file {filename} to disk: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save email source")
+        
+    size_bytes = dest_path.stat().st_size
+    
+    current_sources = load_sources(workspace_id)
+    src = Source(
+        id=source_id,
+        name=name,
+        type="email",
+        path=str(dest_path.relative_to(settings.storage_dir.parent)),
+        url=None,
+        added_at=datetime.now(timezone.utc),
+        size_bytes=size_bytes,
+        status="pending"
+    )
+    
+    current_sources.append(src)
+    save_sources(workspace_id, current_sources)
+    update_workspace_sources_count(workspace_id, len(current_sources))
+    
+    logger.info(f"Registered email source {name} in workspace {workspace_id}")
     return src
 
 @router.delete("/{source_id}")

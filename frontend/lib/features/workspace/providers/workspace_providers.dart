@@ -87,3 +87,8 @@ final activeWorkspaceProvider = FutureProvider.autoDispose.family<Workspace, Str
   final service = ref.watch(workspaceServiceProvider);
   return service.getWorkspace(id);
 });
+
+final workspaceStatsProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, id) async {
+  final service = ref.watch(workspaceServiceProvider);
+  return service.getWorkspaceStats(id);
+});

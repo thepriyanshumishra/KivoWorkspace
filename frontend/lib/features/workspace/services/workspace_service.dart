@@ -97,5 +97,17 @@ class WorkspaceService {
       throw Exception('Failed to delete workspace: Status ${response.statusCode}');
     }
   }
+
+  Future<Map<String, dynamic>> getWorkspaceStats(String id) async {
+    final response = await _client.get(
+      Uri.parse('${AppConstants.backendBaseUrl}${AppConstants.workspacesEndpoint}/$id/stats'),
+    );
+
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(json.decode(utf8.decode(response.bodyBytes)));
+    } else {
+      throw Exception('Failed to load workspace stats: Status ${response.statusCode}');
+    }
+  }
 }
 // 

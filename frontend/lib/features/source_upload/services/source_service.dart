@@ -108,4 +108,24 @@ class SourceService {
       throw Exception(err['detail'] ?? 'Failed to save copied text');
     }
   }
+
+  Future<Source> addCopiedEmail(String workspaceId, String subject, String sender, String recipient, String body) async {
+    final response = await _client.post(
+      Uri.parse('${AppConstants.backendBaseUrl}/workspaces/$workspaceId/sources/email'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({
+        'subject': subject,
+        'sender': sender,
+        'recipient': recipient,
+        'body': body,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return Source.fromJson(json.decode(utf8.decode(response.bodyBytes)));
+    } else {
+      final Map<String, dynamic> err = json.decode(response.body);
+      throw Exception(err['detail'] ?? 'Failed to save copied email');
+    }
+  }
 }

@@ -10,6 +10,9 @@ import '../../features/workspace/screens/workspace_screen.dart';
 import '../../features/source_upload/screens/source_upload_screen.dart';
 import '../../features/processing/screens/processing_screen.dart';
 import '../../features/chat/screens/chat_screen.dart';
+import '../../features/chat/screens/multi_workspace_chat_screen.dart';
+import '../../features/processing/screens/system_health_screen.dart';
+import '../../features/workspace/screens/workspace_settings_screen.dart';
 
 class AppRoutes {
   AppRoutes._();
@@ -19,6 +22,9 @@ class AppRoutes {
   static const String sourceUpload = '/workspace/:workspaceId/upload';
   static const String processing = '/workspace/:workspaceId/processing';
   static const String chat = '/workspace/:workspaceId/chat';
+  static const String multiWorkspaceChat = '/multi-workspace-chat';
+  static const String systemHealth = '/system-health';
+  static const String workspaceSettings = '/workspace/:workspaceId/settings';
 }
 
 final appRouter = GoRouter(
@@ -60,6 +66,24 @@ final appRouter = GoRouter(
       builder: (context, state) {
         final workspaceId = state.pathParameters['workspaceId'] ?? '';
         return ChatScreen(workspaceId: workspaceId);
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.multiWorkspaceChat,
+      name: 'multiWorkspaceChat',
+      builder: (context, state) => const MultiWorkspaceChatScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.systemHealth,
+      name: 'systemHealth',
+      builder: (context, state) => const SystemHealthScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.workspaceSettings,
+      name: 'workspaceSettings',
+      builder: (context, state) {
+        final workspaceId = state.pathParameters['workspaceId'] ?? '';
+        return WorkspaceSettingsScreen(workspaceId: workspaceId);
       },
     ),
   ],

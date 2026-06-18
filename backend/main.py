@@ -136,6 +136,188 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get("/system/diagnostics", tags=["Health"])
+async def system_diagnostics():
+    """
+    Runs real-time diagnostic checks on dependencies and environment resources.
+    Returns status, version, and specific metadata metrics for:
+    - Tesseract OCR
+    - FFmpeg
+    - Ollama LLM
+    - Database (SQLite & FAISS)
+    - Local storage
+    """
+    import time
+    import re
+
+    # 1. Tesseract Check
+    tesseract_path = shutil.which("tesseract")
+    tesseract_status = "Online" if tesseract_path else "Offline"
+    tesseract_version = "Not Found"
+    tesseract_latency = "N/A"
+    
+    if tesseract_path:
+        try:
+            import subprocess
+            t1 = time.time()
+            result = subprocess.run([tesseract_path, "--version"], capture_output=True, text=True, timeout=1.5)
+            latency_ms = int((time.time() - t1) * 1000)
+            tesseract_latency = f"{latency_ms}ms"
+            
+            # Parse version
+            first_line = result.stdout.split("\n")[0] if result.stdout else ""
+            match = re.search(r"tesseract (\S+)", first_line)
+            if match:
+                tesseract_version = f"v{match.group(1)}"
+            else:
+                tesseract_version = "vUnknown"
+        except Exception:
+            tesseract_status = "Warning"
+            tesseract_version = "Error checking version"
+            
+    # 2. FFmpeg Check
+    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_status = "Ready" if ffmpeg_path else "Offline"
+    ffmpeg_version = "Not Found"
+    
+    if ffmpeg_path:
+        try:
+            import subprocess
+            result = subprocess.run([ffmpeg_path, "-version"], capture_output=True, text=True, timeout=1.5)
+            first_line = result.stdout.split("\n")[0] if result.stdout else ""
+            match = re.search(r"ffmpeg version (\S+)", first_line)
+            if match:
+                ffmpeg_version = f"v{match.group(1)}"
+            else:
+                ffmpeg_version = "vUnknown"
+        except Exception:
+            ffmpeg_version = "vUnknown"
+            
+    # 3. Ollama Check
+    ollama_status = "Offline"
+    ollama_version = "N/A"
+    ollama_models = []
+    default_model = settings.ollama_default_model
+    is_model_available = False
+    
+    try:
+        # Check /api/tags
+        response = requests.get(f"{settings.ollama_base_url}/api/tags", timeout=2)
+        if response.status_code == 200:
+            ollama_status = "Online"
+            data = response.json()
+            models = data.get("models", [])
+            ollama_models = [m.get("name") for m in models]
+            
+            # Check version
+            ver_resp = requests.get(f"{settings.ollama_base_url}/api/version", timeout=1)
+            if ver_resp.status_code == 200:
+                ollama_version = f"v{ver_resp.json().get('version', 'unknown')}"
+                
+            # Check model availability
+            is_model_available = any(default_model in m for m in ollama_models)
+    except Exception:
+        pass
+        
+    # 4. Database Check (SQLite + FAISS)
+    import sqlite3
+    db_status = "Connected"
+    collections_count = 0
+    total_embeddings = 0
+    engine_version = "sqlite unknown"
+    
+    try:
+        engine_version = f"sqlite v{sqlite3.sqlite_version}"
+        try:
+            import faiss
+            engine_version += f", faiss v{faiss.__version__}"
+        except Exception:
+            pass
+            
+        workspaces_dir = settings.workspaces_dir
+        if workspaces_dir.exists():
+            for ws_path in workspaces_dir.iterdir():
+                if ws_path.is_dir() and (ws_path / "metadata.json").exists():
+                    collections_count += 1
+                    db_path = ws_path / "metadata.db"
+                    if db_path.exists():
+                        try:
+                            conn = sqlite3.connect(db_path)
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT COUNT(*) FROM child_chunks")
+                            count = cursor.fetchone()[0]
+                            total_embeddings += count
+                            conn.close()
+                        except Exception:
+                            pass
+    except Exception:
+        db_status = "Error"
+        
+    # 5. Local Storage Check
+    storage_path = settings.storage_dir.absolute()
+    storage_status = "Ready"
+    percent = 0.0
+    used_gb = 0.0
+    free_gb = 0.0
+    total_gb = 0.0
+    
+    try:
+        usage = shutil.disk_usage(storage_path)
+        total_gb = round(usage.total / (1024**3), 1)
+        used_gb = round(usage.used / (1024**3), 1)
+        free_gb = round(usage.free / (1024**3), 1)
+        percent = round((usage.used / usage.total) * 100, 1)
+    except Exception:
+        storage_status = "Error"
+        
+    return {
+        "tesseract": {
+            "status": tesseract_status,
+            "version": tesseract_version,
+            "metadata": {
+                "latency": tesseract_latency
+            }
+        },
+        "ffmpeg": {
+            "status": ffmpeg_status,
+            "version": ffmpeg_version,
+            "metadata": {
+                "queue": "0 items"
+            }
+        },
+        "ollama": {
+            "status": ollama_status,
+            "version": ollama_version,
+            "metadata": {
+                "default_model": default_model,
+                "is_model_available": is_model_available,
+                "available_models": ollama_models
+            }
+        },
+        "database": {
+            "status": db_status,
+            "version": engine_version,
+            "metadata": {
+                "engine": "SQLite & FAISS",
+                "collections": collections_count,
+                "total_embeddings": total_embeddings
+            }
+        },
+        "storage": {
+            "status": storage_status,
+            "version": str(storage_path),
+            "metadata": {
+                "path": str(storage_path),
+                "percent": percent,
+                "used_gb": used_gb,
+                "free_gb": free_gb,
+                "total_gb": total_gb
+            }
+        }
+    }
+
+
+
 # --- Router Registration ---
 from app.api.routes.workspaces import router as workspaces_router
 from app.api.routes.sources import router as sources_router

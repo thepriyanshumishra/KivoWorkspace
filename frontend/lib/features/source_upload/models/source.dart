@@ -8,7 +8,8 @@ enum SourceType {
   audio,
   youtube,
   website,
-  text;
+  text,
+  email;
 
   static SourceType fromString(String val) {
     switch (val.toLowerCase()) {
@@ -22,6 +23,8 @@ enum SourceType {
         return SourceType.website;
       case 'text':
         return SourceType.text;
+      case 'email':
+        return SourceType.email;
       case 'pdf':
       default:
         return SourceType.pdf;

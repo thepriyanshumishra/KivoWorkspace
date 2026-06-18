@@ -146,3 +146,34 @@ def delete_workspace(workspace_id: str = Path(..., description="The unique works
     except Exception as e:
         logger.error(f"Failed to delete workspace directory {workspace_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete workspace storage")
+
+
+@router.get("/{workspace_id}/stats")
+def get_workspace_stats(workspace_id: str = Path(..., description="The unique workspace ID")):
+    """Get statistics for the workspace (chunk count, embedding dimension, etc.)."""
+    metadata_file = get_metadata_path(workspace_id)
+    if not metadata_file.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    # Count chunks from SQLite
+    import sqlite3
+    chunks_count = 0
+    db_path = get_workspace_dir(workspace_id) / "metadata.db"
+    if db_path.exists():
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM child_chunks")
+            chunks_count = cursor.fetchone()[0]
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to query child_chunks count for workspace {workspace_id}: {e}")
+            
+    return {
+        "chunks_count": chunks_count,
+        "embedding_dim": 768,
+        "embedding_model": "gte-multilingual-base",
+        "llm_model": settings.ollama_default_model,
+        "status": "ready"
+    }
+

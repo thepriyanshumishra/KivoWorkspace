@@ -459,24 +459,25 @@ class OnboardingService {
     }
   }
 
-  /// Attempts to launch/start the Ollama service programmatically.
+  /// Attempts to launch/start the Ollama service programmatically (headless, no GUI).
   Future<void> startOllamaService() async {
     try {
       if (Platform.isMacOS) {
-        await Process.run('open', ['-a', 'Ollama']);
+        // Use 'ollama serve' directly — avoids opening the Ollama.app GUI window
+        await Process.start('ollama', ['serve'], mode: ProcessStartMode.detached);
       } else if (Platform.isWindows) {
         final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
         final localAppData = Platform.environment['LOCALAPPDATA'] ?? path.join(home, 'AppData', 'Local');
         final ollamaPath = path.join(localAppData, 'Programs', 'Ollama', 'ollama.exe');
         if (File(ollamaPath).existsSync()) {
-          await Process.start(ollamaPath, ['serve']);
+          await Process.start(ollamaPath, ['serve'], mode: ProcessStartMode.detached);
         } else {
-          await Process.start('ollama', ['serve']);
+          await Process.start('ollama', ['serve'], mode: ProcessStartMode.detached);
         }
       } else if (Platform.isLinux) {
         final res = await Process.run('systemctl', ['--user', 'start', 'ollama']);
         if (res.exitCode != 0) {
-          await Process.start('ollama', ['serve']);
+          await Process.start('ollama', ['serve'], mode: ProcessStartMode.detached);
         }
       }
     } catch (_) {}

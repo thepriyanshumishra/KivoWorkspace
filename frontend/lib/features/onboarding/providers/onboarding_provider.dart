@@ -39,6 +39,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
         isTesseractInstalled: deps['tesseract'] ?? false,
         isPythonInstalled: deps['python'] ?? false,
         isEmbeddingModelInstalled: deps['embedding'] ?? false,
+        isOllamaInstalled: deps['ollamaInstalled'] ?? false,
         installedOllamaModels: List<String>.from(deps['ollamaModels'] ?? []),
       );
     } catch (e) {
@@ -197,6 +198,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
     status['Tesseract OCR'] = state.isTesseractInstalled ? 'Already Installed (Skipped) ✅' : 'Queued';
     status['Python Environment'] = state.isPythonInstalled ? 'Already Installed (Skipped) ✅' : 'Queued';
     status['Local Vector Database'] = state.isEmbeddingModelInstalled ? 'Already Installed (Skipped) ✅' : 'Queued';
+    status['Ollama Engine'] = state.isOllamaInstalled ? 'Already Installed (Skipped) ✅' : 'Queued';
 
     state = state.copyWith(installStatus: status);
 
@@ -205,6 +207,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
       'Tesseract OCR': state.isTesseractInstalled,
       'Python Environment': state.isPythonInstalled,
       'Local Vector Database': state.isEmbeddingModelInstalled,
+      'Ollama Engine': state.isOllamaInstalled,
     };
 
     for (final entry in binaries.entries) {
@@ -212,10 +215,20 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
       final isInstalled = entry.value;
 
       if (!isInstalled) {
-        status[bin] = 'Extracting...';
-        state = state.copyWith(installStatus: Map.from(status));
-        await Future.delayed(const Duration(milliseconds: 1500));
-        status[bin] = 'Completed ✅';
+        if (bin == 'Ollama Engine') {
+          status[bin] = 'Installing...';
+          state = state.copyWith(installStatus: Map.from(status));
+          final success = await _service.installOllama();
+          status[bin] = success ? 'Completed ✅' : 'Failed ❌';
+          if (success) {
+            await _service.startOllamaService();
+          }
+        } else {
+          status[bin] = 'Extracting...';
+          state = state.copyWith(installStatus: Map.from(status));
+          await Future.delayed(const Duration(milliseconds: 1500));
+          status[bin] = 'Completed ✅';
+        }
         state = state.copyWith(installStatus: Map.from(status));
       }
     }
@@ -230,6 +243,9 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
     final status = <String, String>{};
     status['Spawning Backend Server'] = 'In Progress...';
     state = state.copyWith(installStatus: status);
+
+    // Ensure Ollama service is running before configurations / pulls
+    await _service.startOllamaService();
 
     // Spawn FastAPI process
     final defaultModel = state.selectedModelIds.first;

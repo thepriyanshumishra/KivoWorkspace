@@ -184,9 +184,11 @@ class OnboardingService {
 
     // 5. Check Ollama Pulled Models
     final List<String> installedOllama = [];
+    bool ollamaRunning = false;
     try {
       final res = await _client.get(Uri.parse('http://localhost:11434/api/tags')).timeout(const Duration(seconds: 1));
       if (res.statusCode == 200) {
+        ollamaRunning = true;
         final Map<String, dynamic> data = json.decode(res.body);
         if (data.containsKey('models')) {
           for (final model in data['models']) {
@@ -198,6 +200,8 @@ class OnboardingService {
       }
     } catch (_) {}
     result['ollamaModels'] = installedOllama;
+    result['ollamaRunning'] = ollamaRunning;
+    result['ollamaInstalled'] = ollamaRunning || lookupOllamaBinary();
 
     return result;
   }
@@ -386,6 +390,96 @@ class OnboardingService {
     if (response.statusCode != 200) {
       throw Exception('Failed to delete model from Ollama: Status ${response.statusCode}');
     }
+  }
+
+  /// Check if the ollama executable is present on the host system.
+  bool lookupOllamaBinary() {
+    // 1. Try PATH resolution first
+    try {
+      final checkCmd = Platform.isWindows ? 'where' : 'which';
+      final res = Process.runSync(checkCmd, ['ollama']);
+      if (res.exitCode == 0) return true;
+    } catch (_) {}
+
+    // 2. Check common paths
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+    final searchDirs = <String>[];
+    if (Platform.isMacOS) {
+      searchDirs.addAll([
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        '/usr/bin',
+        '/bin',
+        '/Applications/Ollama.app/Contents/Resources',
+      ]);
+    } else if (Platform.isLinux) {
+      searchDirs.addAll([
+        '/usr/bin',
+        '/usr/local/bin',
+        '/bin',
+      ]);
+    } else if (Platform.isWindows) {
+      final localAppData = Platform.environment['LOCALAPPDATA'] ?? path.join(home, 'AppData', 'Local');
+      searchDirs.addAll([
+        path.join(localAppData, 'Programs', 'Ollama'),
+      ]);
+    }
+    
+    final binaryName = Platform.isWindows ? 'ollama.exe' : 'ollama';
+    for (final dir in searchDirs) {
+      final file = File(path.join(dir, binaryName));
+      if (file.existsSync()) return true;
+    }
+    return false;
+  }
+
+  /// Downloads and installs Ollama using official scripts/commands.
+  Future<bool> installOllama() async {
+    try {
+      ProcessResult res;
+      if (Platform.isWindows) {
+        // Powershell command: irm https://ollama.com/install.ps1 | iex
+        res = await Process.run('powershell', [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-Command',
+          'irm https://ollama.com/install.ps1 | iex'
+        ]);
+      } else {
+        // Bash command: curl -fsSL https://ollama.com/install.sh | sh
+        res = await Process.run('sh', [
+          '-c',
+          'curl -fsSL https://ollama.com/install.sh | sh'
+        ]);
+      }
+      return res.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Attempts to launch/start the Ollama service programmatically.
+  Future<void> startOllamaService() async {
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', ['-a', 'Ollama']);
+      } else if (Platform.isWindows) {
+        final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+        final localAppData = Platform.environment['LOCALAPPDATA'] ?? path.join(home, 'AppData', 'Local');
+        final ollamaPath = path.join(localAppData, 'Programs', 'Ollama', 'ollama.exe');
+        if (File(ollamaPath).existsSync()) {
+          await Process.start(ollamaPath, ['serve']);
+        } else {
+          await Process.start('ollama', ['serve']);
+        }
+      } else if (Platform.isLinux) {
+        final res = await Process.run('systemctl', ['--user', 'start', 'ollama']);
+        if (res.exitCode != 0) {
+          await Process.start('ollama', ['serve']);
+        }
+      }
+    } catch (_) {}
   }
 
   /// Checks if the backend is responsive via health endpoint.

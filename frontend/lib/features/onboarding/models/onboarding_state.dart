@@ -60,6 +60,7 @@ class OnboardingProgress {
   final bool isTesseractInstalled;
   final bool isPythonInstalled;
   final bool isEmbeddingModelInstalled;
+  final bool isOllamaInstalled;
   final List<String> installedOllamaModels;
 
   OnboardingProgress({
@@ -78,6 +79,7 @@ class OnboardingProgress {
     this.isTesseractInstalled = false,
     this.isPythonInstalled = false,
     this.isEmbeddingModelInstalled = false,
+    this.isOllamaInstalled = false,
     this.installedOllamaModels = const [],
   });
 
@@ -97,6 +99,7 @@ class OnboardingProgress {
     bool? isTesseractInstalled,
     bool? isPythonInstalled,
     bool? isEmbeddingModelInstalled,
+    bool? isOllamaInstalled,
     List<String>? installedOllamaModels,
   }) {
     return OnboardingProgress(
@@ -115,6 +118,7 @@ class OnboardingProgress {
       isTesseractInstalled: isTesseractInstalled ?? this.isTesseractInstalled,
       isPythonInstalled: isPythonInstalled ?? this.isPythonInstalled,
       isEmbeddingModelInstalled: isEmbeddingModelInstalled ?? this.isEmbeddingModelInstalled,
+      isOllamaInstalled: isOllamaInstalled ?? this.isOllamaInstalled,
       installedOllamaModels: installedOllamaModels ?? this.installedOllamaModels,
     );
   }

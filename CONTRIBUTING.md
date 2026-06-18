@@ -77,7 +77,7 @@ sudo apt-get install -y git
 ## Getting the Source Code
 
 ```bash
-git clone https://github.com/thedarkpcm/KivoWorkspace.git
+git clone https://github.com/thepriyanshumishra/KivoWorkspace.git
 cd KivoWorkspace
 ```
 
@@ -359,4 +359,4 @@ ollama pull qwen2.5:1.5b   # pull the default
 
 ---
 
-*For questions or help, open a [GitHub Issue](https://github.com/thedarkpcm/KivoWorkspace/issues).*
+*For questions or help, open a [GitHub Issue](https://github.com/thepriyanshumishra/KivoWorkspace/issues).*

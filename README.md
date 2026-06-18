@@ -85,20 +85,20 @@ ollama pull qwen2.5:1.5b
 ### macOS / Linux — One-line install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/thedarkpcm/KivoWorkspace/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/thepriyanshumishra/KivoWorkspace/main/install.sh | bash
 ```
 
 ### Windows — PowerShell install
 
 ```powershell
-irm https://raw.githubusercontent.com/thedarkpcm/KivoWorkspace/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/thepriyanshumishra/KivoWorkspace/main/install.ps1 | iex
 ```
 
-Both scripts download the latest pre-built binary from [GitHub Releases](https://github.com/thedarkpcm/KivoWorkspace/releases), install it to the appropriate location, and create app shortcuts automatically.
+Both scripts download the latest pre-built binary from [GitHub Releases](https://github.com/thepriyanshumishra/KivoWorkspace/releases), install it to the appropriate location, and create app shortcuts automatically.
 
 ### Manual Download
 
-Download the latest release directly from the [Releases page](https://github.com/thedarkpcm/KivoWorkspace/releases):
+Download the latest release directly from the [Releases page](https://github.com/thepriyanshumishra/KivoWorkspace/releases):
 
 | Platform | File |
 |----------|------|
@@ -142,7 +142,7 @@ Want to run from source, modify the code, or contribute? See **[CONTRIBUTING.md]
 **Quick summary:**
 ```bash
 # Clone the repo
-git clone https://github.com/thedarkpcm/KivoWorkspace.git
+git clone https://github.com/thepriyanshumishra/KivoWorkspace.git
 cd KivoWorkspace
 
 # macOS/Linux: one script sets up everything and launches the app

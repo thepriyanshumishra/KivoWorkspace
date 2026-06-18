@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 # --- Configuration ---
 # Customize this to match your GitHub repository path (owner/repo)
-$GitHubRepo = "thedarkpcm/KivoWorkspace"
+$GitHubRepo = "thepriyanshumishra/KivoWorkspace"
 
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "      Installing Kivo Workspace          " -ForegroundColor Green

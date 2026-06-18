@@ -6,7 +6,7 @@ set -e
 
 # --- Configuration ---
 # Customize this to match your GitHub repository path (owner/repo)
-GITHUB_REPO="thedarkpcm/KivoWorkspace"
+GITHUB_REPO="thepriyanshumishra/KivoWorkspace"
 
 # ANSI Colors
 GREEN='\033[0;32m'

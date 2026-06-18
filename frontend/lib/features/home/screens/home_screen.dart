@@ -255,7 +255,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       Switch(
                         value: notificationsOn,
                         onChanged: (val) => ref.read(notificationsEnabledProvider.notifier).state = val,
-                        activeThumbColor: colors.primary,
+                        // ignore: deprecated_member_use
+                        activeColor: colors.primary,
                       ),
                     ],
                   ),

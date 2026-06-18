@@ -321,6 +321,7 @@ class _ModelDownloaderScreenState extends ConsumerState<ModelDownloaderScreen> {
     else { ramText = colors.statusFailed; ramBg = colors.statusFailedBg; }
 
     return Container(
+      height: 115,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colors.sidebarBackground,
@@ -720,7 +721,7 @@ class _ModelDownloaderScreenState extends ConsumerState<ModelDownloaderScreen> {
                                           crossAxisCount: 2,
                                           crossAxisSpacing: 12,
                                           mainAxisSpacing: 12,
-                                          childAspectRatio: 2.0,
+                                          mainAxisExtent: 115,
                                         ),
                                         itemBuilder: (context, idx) => _buildModelCard(currentModels[idx], colors),
                                       ),

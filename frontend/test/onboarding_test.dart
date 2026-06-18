@@ -18,6 +18,18 @@ class MockOnboardingService extends OnboardingService {
   Future<bool> checkInternetConnection() async {
     return true;
   }
+
+  @override
+  Future<Map<String, dynamic>> checkDependencies() async {
+    return {
+      'ffmpeg': false,
+      'tesseract': false,
+      'python': false,
+      'embedding': false,
+      'ollamaInstalled': false,
+      'ollamaModels': <String>[],
+    };
+  }
 }
 
 void main() {
@@ -110,8 +122,8 @@ void main() {
     test('Size calculation adds model size correctly', () {
       notifier.toggleModelSelection('deepseek-r1:1.5b');
       final totalGb = notifier.getCalculatedDownloadSize();
-      // default: 'qwen2.5:1.5b' (0.98 GB) + 'deepseek-r1:1.5b' (1.1 GB) + core requirement (1.1 GB) = 3.18 GB
-      expect(totalGb, closeTo(3.18, 0.05));
+      // default: 'qwen2.5:1.5b' (0.98 GB) + 'deepseek-r1:1.5b' (1.1 GB) + core requirement (1.41 GB) = 3.49 GB
+      expect(totalGb, closeTo(3.49, 0.05));
     });
   });
 }

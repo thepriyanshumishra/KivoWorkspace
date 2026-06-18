@@ -353,29 +353,34 @@ class OnboardingService {
 
   /// Pulls a model via Ollama API and yields the pulling progress (0.0 to 1.0).
   Stream<double> pullOllamaModel(String modelId, {String? ollamaUrl}) async* {
-    final url = '${ollamaUrl ?? "http://localhost:11434"}/api/pull';
-    final request = http.Request('POST', Uri.parse(url));
-    request.headers['Content-Type'] = 'application/json';
-    request.body = json.encode({'name': modelId});
+    final client = http.Client();
+    try {
+      final url = '${ollamaUrl ?? "http://localhost:11434"}/api/pull';
+      final request = http.Request('POST', Uri.parse(url));
+      request.headers['Content-Type'] = 'application/json';
+      request.body = json.encode({'name': modelId});
 
-    final response = await _client.send(request);
-    if (response.statusCode == 200) {
-      final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
-      await for (final line in stream) {
-        if (line.trim().isEmpty) continue;
-        try {
-          final Map<String, dynamic> data = json.decode(line);
-          if (data.containsKey('completed') && data.containsKey('total')) {
-            final completed = data['completed'] as int;
-            final total = data['total'] as int;
-            if (total > 0) {
-              yield completed / total;
+      final response = await client.send(request);
+      if (response.statusCode == 200) {
+        final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+        await for (final line in stream) {
+          if (line.trim().isEmpty) continue;
+          try {
+            final Map<String, dynamic> data = json.decode(line);
+            if (data.containsKey('completed') && data.containsKey('total')) {
+              final completed = data['completed'] as int;
+              final total = data['total'] as int;
+              if (total > 0) {
+                yield completed / total;
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
+      } else {
+        throw Exception('Failed to pull model from Ollama: Status ${response.statusCode}');
       }
-    } else {
-      throw Exception('Failed to pull model from Ollama: Status ${response.statusCode}');
+    } finally {
+      client.close();
     }
   }
 

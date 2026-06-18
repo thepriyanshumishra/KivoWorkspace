@@ -449,7 +449,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       'Agentic & Tool-Use', 'Roleplay & Storytelling', 'Speed & Low-Resource',
       'Medical & Science', 'Multilingual & Translation', 'Uncensored', 'Custom',
     ];
-    final categories = ['Recommended', ...allCatSet, 'Custom'];
+    final categories = ['Recommended', ...allCatSet];
     categories.sort((a, b) {
       final ia = categoryOrder.indexOf(a); final ib = categoryOrder.indexOf(b);
       return (ia == -1 ? 99 : ia).compareTo(ib == -1 ? 99 : ib);

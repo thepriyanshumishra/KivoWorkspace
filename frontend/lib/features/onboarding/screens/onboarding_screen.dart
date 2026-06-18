@@ -522,6 +522,31 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           child: Column(
             children: [
               _summaryItemTile(
+                'Ollama Engine',
+                progress.isOllamaInstalled ? 'Already Installed (Skipped)' : 'Required for running local LLMs',
+                progress.isOllamaInstalled ? '0 MB' : '300 MB',
+                colors,
+                isInstalled: progress.isOllamaInstalled,
+              ),
+              ...progress.selectedModelIds.map((id) {
+                final match = curatedModelRegistry.firstWhere((m) => m.id == id);
+                final isModelInstalled = progress.installedOllamaModels.any((m) => m == id || m.startsWith('$id:') || id.startsWith('$m:'));
+                return _summaryItemTile(
+                  match.name,
+                  isModelInstalled ? 'Already Installed (Skipped)' : 'Ollama Local LLM',
+                  isModelInstalled ? '0 MB' : match.size,
+                  colors,
+                  isInstalled: isModelInstalled,
+                );
+              }),
+              _summaryItemTile(
+                'Embedding Engine',
+                progress.isEmbeddingModelInstalled ? 'Already Installed (Skipped)' : 'ONNX quantized model (gte-multilingual-base)',
+                progress.isEmbeddingModelInstalled ? '0 MB' : '600 MB',
+                colors,
+                isInstalled: progress.isEmbeddingModelInstalled,
+              ),
+              _summaryItemTile(
                 'FFmpeg Binary',
                 progress.isFfmpegInstalled ? 'Already Installed (Skipped)' : 'Required for audio transcription',
                 progress.isFfmpegInstalled ? '0 MB' : '70 MB',
@@ -535,31 +560,38 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 colors,
                 isInstalled: progress.isTesseractInstalled,
               ),
-              _summaryItemTile(
-                'Embedding Engine',
-                progress.isEmbeddingModelInstalled ? 'Already Installed (Skipped)' : 'ONNX quantized model (gte-multilingual-base)',
-                progress.isEmbeddingModelInstalled ? '0 MB' : '600 MB',
-                colors,
-                isInstalled: progress.isEmbeddingModelInstalled,
+              const Divider(height: 1),
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  iconColor: colors.primary,
+                  collapsedIconColor: colors.textSecondary,
+                  title: Row(
+                    children: [
+                      Icon(Icons.more_horiz, size: 18, color: colors.textSecondary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Others',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13.5,
+                          color: colors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  children: [
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    _summaryItemTile(
+                      'Python Libraries',
+                      progress.isPythonInstalled ? 'Already Installed (Skipped)' : 'Quantized tokenizers, FAISS, ONNX-Runtime core dependencies',
+                      progress.isPythonInstalled ? '0 MB' : '400 MB',
+                      colors,
+                      isInstalled: progress.isPythonInstalled,
+                    ),
+                  ],
+                ),
               ),
-              _summaryItemTile(
-                'Python Libraries',
-                progress.isPythonInstalled ? 'Already Installed (Skipped)' : 'Quantized tokenizers, FAISS, ONNX-Runtime core dependencies',
-                progress.isPythonInstalled ? '0 MB' : '400 MB',
-                colors,
-                isInstalled: progress.isPythonInstalled,
-              ),
-              ...progress.selectedModelIds.map((id) {
-                final match = curatedModelRegistry.firstWhere((m) => m.id == id);
-                final isModelInstalled = progress.installedOllamaModels.any((m) => m == id || m.startsWith('$id:') || id.startsWith('$m:'));
-                return _summaryItemTile(
-                  match.name,
-                  isModelInstalled ? 'Already Installed (Skipped)' : 'Ollama Local LLM',
-                  isModelInstalled ? '0 MB' : match.size,
-                  colors,
-                  isInstalled: isModelInstalled,
-                );
-              }),
             ],
           ),
         ),

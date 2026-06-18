@@ -92,6 +92,7 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
     if (!state.isTesseractInstalled) total += 0.04; // 40 MB
     if (!state.isEmbeddingModelInstalled) total += 0.60; // 600 MB
     if (!state.isPythonInstalled) total += 0.40; // 400 MB
+    if (!state.isOllamaInstalled) total += 0.30; // 300 MB
 
     for (final id in state.selectedModelIds) {
       final isModelInstalled = state.installedOllamaModels.any((m) => m == id || m.startsWith('$id:') || id.startsWith('$m:'));

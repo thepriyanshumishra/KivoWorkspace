@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
+import '../../features/tutorial/providers/tutorial_provider.dart';
+import '../../features/tutorial/screens/tutorial_overlay.dart';
 
 /// Items in the workspace-scoped sidebar.
 /// Only Chat, Sources, and Settings are full active items.
@@ -12,7 +15,7 @@ enum StealthNavigationItem {
   systemHealth,
 }
 
-class StealthNavigationLayout extends StatelessWidget {
+class StealthNavigationLayout extends ConsumerWidget {
   final Widget child;
   final StealthNavigationItem activeItem;
   final String? workspaceId;
@@ -55,7 +58,15 @@ class StealthNavigationLayout extends StatelessWidget {
     final colors = context.colors;
     final isSelected = activeItem == item;
 
+    Key? widgetKey;
+    if (item == StealthNavigationItem.sources) {
+      widgetKey = TutorialKeys.addSources;
+    } else if (item == StealthNavigationItem.settings) {
+      widgetKey = TutorialKeys.settingsBtn;
+    }
+
     return Padding(
+      key: widgetKey,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Material(
         color: isSelected
@@ -146,13 +157,81 @@ class StealthNavigationLayout extends StatelessWidget {
     );
   }
 
+  Widget _buildDoneOverlay(BuildContext context, WidgetRef ref) {
+    final colors = context.colors;
+    return Container(
+      color: Colors.black.withValues(alpha: 0.6),
+      alignment: Alignment.center,
+      child: Card(
+        color: colors.sidebarBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: colors.border),
+        ),
+        elevation: 12,
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_outline_rounded, size: 36, color: Colors.green),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'You\'re All Set! 🎉',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  color: colors.textPrimary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'You have learned the basics of Kivo Workspace. Now you can ingest your local files and chat with them in complete privacy.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: colors.textSecondary,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => ref.read(tutorialProvider.notifier).finishTutorial(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Finish Tour', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final displayName = workspaceName ?? 'Workspace';
+    final tutorialState = ref.watch(tutorialProvider);
 
-    return Scaffold(
+    Widget layout = Scaffold(
       body: Row(
         children: [
           // Workspace-scoped left sidebar
@@ -340,5 +419,41 @@ class StealthNavigationLayout extends StatelessWidget {
         ],
       ),
     );
+
+    if (tutorialState.isActive) {
+      if (tutorialState.currentStep == TutorialStep.addSources) {
+        layout = TutorialOverlay(
+          targetKey: TutorialKeys.addSources,
+          title: 'Add Knowledge Sources',
+          description: 'Upload PDFs, text files, images (OCR), or audio (transcription). All processing happens 100% locally on your machine.',
+          onNext: () {
+            ref.read(tutorialProvider.notifier).nextStep();
+            context.go('/workspace/${workspaceId ?? 'default'}');
+          },
+          onSkip: () => ref.read(tutorialProvider.notifier).skipTutorial(),
+          child: layout,
+        );
+      } else if (tutorialState.currentStep == TutorialStep.settings) {
+        layout = TutorialOverlay(
+          targetKey: TutorialKeys.settingsBtn,
+          title: 'Workspace Settings',
+          description: 'Tweak retrieval options, configure your local LLM model temperature, or change themes and typography here.',
+          onNext: () {
+            ref.read(tutorialProvider.notifier).nextStep();
+          },
+          onSkip: () => ref.read(tutorialProvider.notifier).skipTutorial(),
+          child: layout,
+        );
+      } else if (tutorialState.currentStep == TutorialStep.done) {
+        layout = Stack(
+          children: [
+            layout,
+            _buildDoneOverlay(context, ref),
+          ],
+        );
+      }
+    }
+
+    return layout;
   }
 }

@@ -7,7 +7,7 @@ import threading
 import time
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path as FilePath
 
 
@@ -56,7 +56,7 @@ def _update_workspace_status(workspace_id: str, status: str):
     except Exception as e:
         logger.error(f"Failed to update workspace status for {workspace_id} to {status}: {e}")
 
-def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: threading.Event):
+def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: threading.Event, chunk_size: int = 1000, chunk_overlap: int = 200):
     logger.info(f"Background processing thread started for workspace {workspace_id}")
     job = processing_jobs.get(workspace_id)
     if not job:
@@ -80,7 +80,7 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
             
             if step == "pdf_extraction":
                 from app.core.processors.pdf import PDFProcessor
-                processor = PDFProcessor()
+                processor = PDFProcessor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
                 for src in sources:
                     if src.type == "pdf" and src.status == "processing":
                         if cancel_event.is_set():
@@ -151,7 +151,7 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             src.status = "failed"
             elif step == "website_extraction":
                 from app.core.processors.website import WebsiteProcessor
-                processor = WebsiteProcessor()
+                processor = WebsiteProcessor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
                 for src in sources:
                     if src.type == "website" and src.status == "processing":
                         if cancel_event.is_set():
@@ -168,7 +168,7 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             src.status = "failed"
             elif step == "text_extraction":
                 from app.core.processors.text import TextProcessor
-                processor = TextProcessor()
+                processor = TextProcessor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
                 for src in sources:
                     if src.type == "text" and src.status == "processing":
                         if cancel_event.is_set():
@@ -185,7 +185,7 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             src.status = "failed"
             elif step == "email_extraction":
                 from app.core.processors.email import EmailProcessor
-                processor = EmailProcessor()
+                processor = EmailProcessor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
                 for src in sources:
                     if src.type == "email" and src.status == "processing":
                         if cancel_event.is_set():
@@ -259,13 +259,39 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
         _update_workspace_status(workspace_id, "ready")
         logger.info(f"Background processing pipeline completed for workspace {workspace_id}")
         
+        # Trigger macOS OS notification
+        try:
+            import platform
+            import subprocess
+            if platform.system() == "Darwin":
+                metadata_file = get_metadata_path(workspace_id)
+                workspace_name = "Workspace"
+                if metadata_file.exists():
+                    try:
+                        with open(metadata_file, "r") as f:
+                            data = json.load(f)
+                        workspace_name = data.get("name", "Workspace")
+                    except Exception:
+                        pass
+                subprocess.run([
+                    "osascript", "-e",
+                    f'display notification "Ingestion completed successfully for workspace \'{workspace_name}\'." with title "Kivo Workspace" subtitle "Processing Complete" sound name "Glass"'
+                ])
+        except Exception as notify_err:
+            logger.error(f"Failed to send OS notification: {notify_err}")
+        
     except Exception as e:
         logger.error(f"Pipeline failure in workspace {workspace_id}: {e}")
         job["status"] = "failed"
         _update_workspace_status(workspace_id, "failed")
 
+
 @router.post("/process", response_model=ProcessingStatusResponse)
-def start_processing(workspace_id: str = Path(..., description="The unique workspace ID")):
+def start_processing(
+    workspace_id: str = Path(..., description="The unique workspace ID"),
+    chunk_size: Optional[int] = None,
+    chunk_overlap: Optional[int] = None
+):
     """Trigger background sequential extraction and processing pipeline."""
     workspace_dir = get_workspace_dir(workspace_id)
     if not workspace_dir.exists():
@@ -326,10 +352,13 @@ def start_processing(workspace_id: str = Path(..., description="The unique works
     }
     processing_jobs[workspace_id] = job
     
+    c_size = chunk_size if chunk_size is not None else settings.chunk_size
+    c_overlap = chunk_overlap if chunk_overlap is not None else settings.chunk_overlap
+
     # Start thread
     thread = threading.Thread(
         target=run_processing_pipeline,
-        args=(workspace_id, steps, cancel_event),
+        args=(workspace_id, steps, cancel_event, c_size, c_overlap),
         daemon=True
     )
     thread.start()

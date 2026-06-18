@@ -1,35 +1,126 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../workspace/providers/workspace_providers.dart';
+import '../models/chat_message.dart';
+import '../models/citation.dart';
+import '../providers/chat_providers.dart';
 
-class MultiWorkspaceChatScreen extends StatefulWidget {
+class MultiWorkspaceChatScreen extends ConsumerStatefulWidget {
   const MultiWorkspaceChatScreen({super.key});
 
   @override
-  State<MultiWorkspaceChatScreen> createState() => _MultiWorkspaceChatScreenState();
+  ConsumerState<MultiWorkspaceChatScreen> createState() => _MultiWorkspaceChatScreenState();
 }
 
-class _MultiWorkspaceChatScreenState extends State<MultiWorkspaceChatScreen> {
+class _MultiWorkspaceChatScreenState extends ConsumerState<MultiWorkspaceChatScreen> {
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _focusNode = FocusNode();
+  
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.onKeyEvent = (node, event) {
+      if (event is KeyDownEvent) {
+        final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter;
+        final isShift = HardwareKeyboard.instance.isShiftPressed;
+        if (isEnter && !isShift) {
+          _sendMessage();
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.ignored;
+    };
+  }
+  
   bool _isScopeExpanded = true;
-  bool _engChecked = true;
-  bool _marketingChecked = true;
-  bool _feedbackChecked = true;
-  final bool _hrChecked = false;
+  bool _isStrictSourceMode = true;
+  final Set<String> _selectedWorkspaceIds = {};
+  bool _hasInitializedWorkspaces = false;
 
-  int _getSelectedCount() {
-    int count = 0;
-    if (_engChecked) count++;
-    if (_marketingChecked) count++;
-    if (_feedbackChecked) count++;
-    if (_hrChecked) count++;
-    return count;
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      });
+    }
+  }
+
+  void _sendMessage() {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    if (_selectedWorkspaceIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one workspace to search.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    _messageController.clear();
+    ref.read(universalChatProvider.notifier).sendUniversalMessage(
+          _selectedWorkspaceIds.toList(),
+          text,
+          isStrict: _isStrictSourceMode,
+        );
+    _focusNode.requestFocus();
+    _scrollToBottom();
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final selectedCount = _getSelectedCount();
+    
+    // Watch workspaces list
+    final workspacesAsync = ref.watch(workspacesProvider);
+    final chatState = ref.watch(universalChatProvider);
+
+    // Initialize selection with all workspaces
+    workspacesAsync.whenData((list) {
+      if (!_hasInitializedWorkspaces) {
+        _selectedWorkspaceIds.addAll(list.map((w) => w.id));
+        _hasInitializedWorkspaces = true;
+      }
+    });
+
+    // Listen for error messages
+    ref.listen<ChatState>(universalChatProvider, (previous, next) {
+      if (next.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.errorMessage!),
+            backgroundColor: colors.statusFailed,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        ref.read(universalChatProvider.notifier).clearError();
+      }
+      if (next.messages.length > (previous?.messages.length ?? 0)) {
+        _scrollToBottom();
+      }
+    });
+
+    final selectedCount = _selectedWorkspaceIds.length;
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -56,375 +147,281 @@ class _MultiWorkspaceChatScreenState extends State<MultiWorkspaceChatScreen> {
         ),
       ),
       body: Column(
-          children: [
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 24),
+        children: [
+          // Scope Checklist Card
+          Padding(
+            padding: const EdgeInsets.fromLTRB(36, 24, 36, 12),
+            child: Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF202020) : Colors.white,
+                border: Border.all(color: colors.border),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
                 children: [
-                  // Universal Search Scope Header Card
-                  Container(
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF202020) : Colors.white,
-                      border: Border.all(color: colors.border),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      children: [
-                        // Card Header Row
-                        InkWell(
-                          onTap: () {
-                            setState(() {
-                              _isScopeExpanded = !_isScopeExpanded;
-                            });
-                          },
-                          borderRadius: BorderRadius.circular(8),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                            child: Row(
-                              children: [
-                                Icon(Icons.manage_search_rounded, size: 18, color: colors.primary),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Universal Search Scope',
-                                  style: TextStyle(
-                                    fontSize: 14.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: colors.textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF1F1EF),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    '$selectedCount Selected',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.textSecondary,
-                                    ),
-                                  ),
-                                ),
-                                const Spacer(),
-                                Icon(
-                                  _isScopeExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                                  size: 18,
-                                  color: colors.textSecondary,
-                                ),
-                              ],
+                  // Card Header Row
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        _isScopeExpanded = !_isScopeExpanded;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      child: Row(
+                        children: [
+                          Icon(Icons.manage_search_rounded, size: 18, color: colors.primary),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Universal Search Scope',
+                            style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF1F1EF),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '$selectedCount Selected',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: colors.textSecondary,
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(
+                            _isScopeExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                            size: 18,
+                            color: colors.textSecondary,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
 
-                        // Expanded grid panel
-                        if (_isScopeExpanded) ...[
-                          const Divider(height: 1),
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: GridView.count(
+                  // Expanded grid panel
+                  if (_isScopeExpanded) ...[
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: workspacesAsync.when(
+                        data: (workspaces) {
+                          if (workspaces.isEmpty) {
+                            return Center(
+                              child: Text(
+                                'No workspaces available. Create a workspace first.',
+                                style: TextStyle(color: colors.textMuted, fontSize: 13),
+                              ),
+                            );
+                          }
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: 2,
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
                               crossAxisSpacing: 20,
                               mainAxisSpacing: 12,
                               childAspectRatio: 4.5,
-                              children: [
-                                // Checkbox 1
-                                _buildScopeCheckbox(
-                                  context: context,
-                                  value: _engChecked,
-                                  title: 'Engineering Docs',
-                                  subtitle: 'Last updated 2h ago',
-                                  hasLock: true,
-                                  onChanged: (val) {
-                                    setState(() {
-                                      _engChecked = val ?? false;
-                                    });
-                                  },
-                                ),
-                                // Checkbox 2
-                                _buildScopeCheckbox(
-                                  context: context,
-                                  value: _marketingChecked,
-                                  title: 'Q3 Marketing Plans',
-                                  subtitle: 'Last updated yesterday',
-                                  onChanged: (val) {
-                                    setState(() {
-                                      _marketingChecked = val ?? false;
-                                    });
-                                  },
-                                ),
-                                // Checkbox 3
-                                _buildScopeCheckbox(
-                                  context: context,
-                                  value: _feedbackChecked,
-                                  title: 'Customer Feedback 2023',
-                                  subtitle: '14,203 records',
-                                  onChanged: (val) {
-                                    setState(() {
-                                      _feedbackChecked = val ?? false;
-                                    });
-                                  },
-                                ),
-                                // Checkbox 4 (HR - Restricted)
-                                _buildScopeCheckbox(
-                                  context: context,
-                                  value: _hrChecked,
-                                  title: 'HR Policies',
-                                  subtitle: 'Restricted access',
-                                  hasLock: true,
-                                  isDisabled: true,
-                                  onChanged: null,
-                                ),
-                              ],
                             ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
-                  // Kivo Copilot Message Block
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: colors.primary,
-                          borderRadius: BorderRadius.circular(4),
+                            itemCount: workspaces.length,
+                            itemBuilder: (context, index) {
+                              final ws = workspaces[index];
+                              final isSelected = _selectedWorkspaceIds.contains(ws.id);
+                              return Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Checkbox(
+                                      value: isSelected,
+                                      activeColor: colors.primary,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          if (val == true) {
+                                            _selectedWorkspaceIds.add(ws.id);
+                                          } else {
+                                            _selectedWorkspaceIds.remove(ws.id);
+                                          }
+                                        });
+                                      },
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            ws.name,
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              fontWeight: FontWeight.w600,
+                                              color: colors.textPrimary,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          Text(
+                                            '${ws.sourcesCount} sources',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: colors.textMuted,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
+                        loading: () => const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                        alignment: Alignment.center,
-                        child: const Text(
-                          'K',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                        error: (err, _) => Center(
+                          child: Text(
+                            'Error loading workspaces: $err',
+                            style: TextStyle(color: colors.statusFailed, fontSize: 13),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Kivo Copilot',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: colors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Comparison response box
-                  Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF202020) : Colors.white,
-                      border: Border.all(color: colors.border),
-                      borderRadius: BorderRadius.circular(8),
                     ),
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Based on the documents across your selected workspaces, there is a slight misalignment between the technical implementation and the public messaging regarding the v2 API.',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            color: colors.textPrimary,
-                            height: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Quote Block 1: Engineering
-                        _buildQuoteBlock(
-                          context: context,
-                          color: colors.primary,
-                          title: 'Engineering Implementation',
-                          content: 'The Engineering Docs indicate that the v2 API will primarily support REST protocols initially, with GraphQL support delayed to Q4.',
-                          tags: ['ENG-12', 'ENG-45'],
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Quote Block 2: Marketing
-                        _buildQuoteBlock(
-                          context: context,
-                          color: Colors.orange.shade300,
-                          title: 'Marketing Messaging',
-                          content: 'However, the Q3 Marketing Plans highlight "Full GraphQL Support from Day 1" as a core selling point for the enterprise tier.',
-                          tags: ['MKT-03'],
-                        ),
-                        const SizedBox(height: 16),
-
-                        Text(
-                          'Customer feedback from 2023 suggests that 68% of enterprise clients requested GraphQL [FB-102], which likely drove the marketing push, but engineering timelines have since shifted.',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            color: colors.textPrimary,
-                            height: 1.5,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Sources used row
-                        const Divider(),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Text(
-                              'SOURCES USED: ',
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontFamily: 'IBM Plex Mono',
-                                fontWeight: FontWeight.w700,
-                                color: colors.textMuted,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            _buildSourcePill(context, 'API_v2_Roadmap.md'),
-                            const SizedBox(width: 8),
-                            _buildSourcePill(context, 'Enterprise_Launch_Deck.pdf'),
-                            const SizedBox(width: 8),
-                            _buildSourcePill(context, 'Survey_Results_23.csv'),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
                 ],
               ),
             ),
+          ),
 
-            // Chat Input Box
-            Container(
-              padding: const EdgeInsets.all(20),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF202020) : const Color(0xFFFBFBFA),
-                  border: Border.all(color: colors.border),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Row(
+          // Messages View
+          Expanded(
+            child: chatState.messages.isEmpty
+                ? _buildEmptyState(context)
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 16),
+                    itemCount: chatState.messages.length + (chatState.isLoading ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == chatState.messages.length) {
+                        return _buildSkeletonBubble(context);
+                      }
+                      final isLast = index == chatState.messages.length - 1;
+                      return _buildMessageBubble(context, chatState.messages[index], isLast: isLast);
+                    },
+                  ),
+          ),
+
+          // Chat Input Controls
+          Container(
+            padding: const EdgeInsets.fromLTRB(36, 12, 36, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Mode Toggle Capsule Row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.attach_file_rounded, size: 18, color: colors.textSecondary),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        style: TextStyle(color: colors.textPrimary, fontSize: 13.5),
-                        decoration: InputDecoration(
-                          hintText: 'Ask across all selected workspaces...',
-                          hintStyle: TextStyle(color: colors.textMuted, fontSize: 13.5),
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          filled: false,
-                        ),
-                      ),
+                    _buildModeToggleOption(
+                      label: 'Strict Source Mode 🔒',
+                      tooltip: 'Answers strictly from documents. Refuses if not found.',
+                      isActive: _isStrictSourceMode,
+                      onTap: () => setState(() => _isStrictSourceMode = true),
                     ),
                     const SizedBox(width: 8),
-                    // Scope Pill
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: colors.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.layers_outlined, size: 12, color: colors.primary),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Universal Scope',
-                            style: TextStyle(
-                              color: colors.primary,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    _buildModeToggleOption(
+                      label: 'Creative AI Mode 🌐',
+                      tooltip: 'Sources are prioritized, but general AI knowledge is used to elaborate.',
+                      isActive: !_isStrictSourceMode,
+                      onTap: () => setState(() => _isStrictSourceMode = false),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                
+                // TextInput Box
+                Container(
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF202020) : const Color(0xFFFBFBFA),
+                    border: Border.all(color: colors.border),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(Icons.attach_file_rounded, size: 18, color: colors.textSecondary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: _messageController,
+                          focusNode: _focusNode,
+                          minLines: 1,
+                          maxLines: 5,
+                          style: TextStyle(color: colors.textPrimary, fontSize: 13.5),
+                          decoration: InputDecoration(
+                            hintText: 'Ask across all selected workspaces...',
+                            hintStyle: TextStyle(color: colors.textMuted, fontSize: 13.5),
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            filled: false,
                           ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    IconButton(
-                      icon: const Icon(Icons.arrow_upward_rounded, size: 16, color: Colors.white),
-                      onPressed: () {},
-                      style: IconButton.styleFrom(
-                        backgroundColor: colors.primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-  }
-
-  Widget _buildScopeCheckbox({
-    required BuildContext context,
-    required bool value,
-    required String title,
-    required String subtitle,
-    bool hasLock = false,
-    bool isDisabled = false,
-    required ValueChanged<bool?>? onChanged,
-  }) {
-    final colors = context.colors;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Checkbox(
-            value: value,
-            onChanged: isDisabled ? null : onChanged,
-            activeColor: colors.primary,
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: isDisabled ? colors.textMuted : colors.textPrimary,
+                          onSubmitted: (_) => _sendMessage(),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    if (hasLock) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.lock_outline_rounded, size: 12, color: colors.textMuted),
+                      const SizedBox(width: 8),
+                      // Scope indicator
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: colors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.layers_outlined, size: 12, color: colors.primary),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Universal Scope ($selectedCount)',
+                              style: TextStyle(
+                                color: colors.primary,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        onPressed: chatState.isLoading ? null : _sendMessage,
+                        icon: chatState.isLoading
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                                ),
+                              )
+                            : const Icon(Icons.arrow_upward_rounded, size: 16, color: Colors.white),
+                        style: IconButton.styleFrom(
+                           backgroundColor: colors.primary,
+                        ),
+                      ),
                     ],
-                  ],
-                ),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: colors.textMuted,
                   ),
                 ),
               ],
@@ -435,96 +432,495 @@ class _MultiWorkspaceChatScreenState extends State<MultiWorkspaceChatScreen> {
     );
   }
 
-  Widget _buildQuoteBlock({
-    required BuildContext context,
-    required Color color,
-    required String title,
-    required String content,
-    required List<String> tags,
+  Widget _buildModeToggleOption({
+    required String label,
+    required String tooltip,
+    required bool isActive,
+    required VoidCallback onTap,
   }) {
     final colors = context.colors;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(color: color, width: 3),
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: isActive ? colors.primary.withValues(alpha: 0.1) : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          hoverColor: colors.textPrimary.withValues(alpha: 0.05),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isActive ? colors.primary.withValues(alpha: 0.4) : colors.border,
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                color: isActive ? colors.primary : colors.textSecondary,
+              ),
+            ),
+          ),
         ),
       ),
-      padding: const EdgeInsets.only(left: 12, top: 2, bottom: 2),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    final colors = context.colors;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.forum_outlined, size: 64, color: colors.primary.withValues(alpha: 0.5)),
+            const SizedBox(height: 24),
+            Text(
+              'Ask anything across multiple workspaces',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: colors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 24),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                _QuickActionChip(
+                  label: '✦ Summarize all files',
+                  onTap: () {
+                    _messageController.text = 'Summarize references across all my selected workspaces.';
+                    _sendMessage();
+                  },
+                ),
+                _QuickActionChip(
+                  label: '✦ Find misalignments',
+                  onTap: () {
+                    _messageController.text = 'Are there any misalignments between technical plans and customer feedback?';
+                    _sendMessage();
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(BuildContext context, ChatMessage message, {required bool isLast}) {
+    final colors = context.colors;
+    final alignment = message.isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start;
+    final bubbleBg = message.isUser ? colors.sidebarBackground : colors.primarySubtle;
+    final textStyle = TextStyle(
+      color: colors.textPrimary,
+      fontSize: 14,
+      height: 1.5,
+    );
+
+    if (!message.isUser && message.text.isEmpty) {
+      return _buildSkeletonBubble(context);
+    }
+
+    final isStreaming = isLast && !message.isUser && message.citations.isEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: alignment,
         children: [
           Row(
+            mainAxisAlignment: message.isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: colors.textPrimary,
-                ),
-              ),
-              const SizedBox(width: 10),
-              ...tags.map((t) => Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF1F1EF),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                      child: Text(
-                        t,
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontFamily: 'IBM Plex Mono',
-                          color: colors.textSecondary,
-                        ),
-                      ),
+              if (!message.isUser) ...[
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: colors.primary,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'K',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
                     ),
-                  )),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Kivo Copilot',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            content,
-            style: TextStyle(
-              fontSize: 13,
-              color: colors.textSecondary,
-              height: 1.4,
+          Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
             ),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: bubbleBg,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(12),
+                topRight: const Radius.circular(12),
+                bottomLeft: Radius.circular(message.isUser ? 12 : 0),
+                bottomRight: Radius.circular(message.isUser ? 0 : 12),
+              ),
+              border: Border.all(color: colors.border),
+            ),
+            child: isStreaming
+                ? SelectableText.rich(
+                    TextSpan(
+                      text: message.text,
+                      style: textStyle,
+                      children: const [
+                        WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: Padding(
+                            padding: EdgeInsets.only(left: 2),
+                            child: _FlashingCursor(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : SelectableText(
+                    message.text,
+                    style: textStyle,
+                  ),
           ),
+          if (!message.isUser && message.citations.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: message.citations.map((cit) => _buildCitationChip(context, cit)).toList(),
+              ),
+            ),
+          ],
+
         ],
       ),
     );
   }
 
-  Widget _buildSourcePill(BuildContext context, String filename) {
+  Widget _buildCitationChip(BuildContext context, Citation citation) {
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2D2D2D) : const Color(0xFFFBFBFA),
-        border: Border.all(color: colors.border),
-        borderRadius: BorderRadius.circular(4),
+    return Tooltip(
+      richMessage: WidgetSpan(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 350),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.description_outlined, color: colors.primary, size: 14),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      citation.sourceName,
+                      style: TextStyle(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              if (citation.snippet != null && citation.snippet!.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  citation.snippet!,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.description_outlined, size: 12, color: colors.textSecondary),
-          const SizedBox(width: 6),
-          Text(
-            filename,
-            style: TextStyle(
-              color: colors.textSecondary,
-              fontSize: 10.5,
-            ),
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF1E1E1E).withValues(alpha: 0.95)
+            : Colors.white.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            spreadRadius: 2,
           ),
         ],
+      ),
+      preferBelow: false,
+      verticalOffset: 20,
+      waitDuration: const Duration(milliseconds: 200),
+      child: InkWell(
+        onTap: () => _showCitationDetails(context, citation),
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: colors.sidebarBackground,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: colors.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '[${citation.index}]',
+                style: TextStyle(
+                  color: colors.primary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                citation.sourceName,
+                style: TextStyle(
+                  color: colors.textSecondary,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSkeletonBubble(BuildContext context) {
+    final colors = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.7,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: colors.primarySubtle,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(12),
+              topRight: Radius.circular(12),
+              bottomRight: Radius.circular(12),
+            ),
+            border: Border.all(color: colors.border),
+          ),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ShimmerPlaceholder(width: double.infinity, height: 14),
+              SizedBox(height: 8),
+              _ShimmerPlaceholder(width: double.infinity, height: 14),
+              SizedBox(height: 8),
+              _ShimmerPlaceholder(width: 120, height: 14),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showCitationDetails(BuildContext context, Citation citation) {
+    final colors = context.colors;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.article_outlined, color: colors.primary),
+              const SizedBox(width: 8),
+              Text('Footnote [${citation.index}]'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Source Document Name:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(citation.sourceName),
+              const SizedBox(height: 12),
+              if (citation.snippet != null && citation.snippet!.isNotEmpty) ...[
+                const Text('Snippet:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                Text(citation.snippet!),
+                const SizedBox(height: 12),
+              ],
+              const Text('Raw Chunk Citation ID:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(citation.rawId, style: const TextStyle(fontFamily: 'monospace')),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _QuickActionChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _QuickActionChip({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          color: colors.sidebarBackground,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: colors.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: colors.textSecondary,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
 }
+
+class _FlashingCursor extends StatefulWidget {
+  const _FlashingCursor();
+
+  @override
+  State<_FlashingCursor> createState() => _FlashingCursorState();
+}
+
+class _FlashingCursorState extends State<_FlashingCursor> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return FadeTransition(
+      opacity: _controller,
+      child: Container(
+        width: 2,
+        height: 15,
+        color: colors.primary,
+      ),
+    );
+  }
+}
+
+class _ShimmerPlaceholder extends StatefulWidget {
+  final double width;
+  final double height;
+
+  const _ShimmerPlaceholder({
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  State<_ShimmerPlaceholder> createState() => _ShimmerPlaceholderState();
+}
+
+class _ShimmerPlaceholderState extends State<_ShimmerPlaceholder> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0.4, end: 1.0).animate(_controller);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return FadeTransition(
+      opacity: _animation,
+      child: Container(
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          color: colors.textSecondary.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+    );
+  }
+}
+

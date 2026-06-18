@@ -231,3 +231,26 @@ def delete_source_chunks(workspace_id: str, source_id: str):
         logger.error(f"Failed to delete SQLite chunks for source {source_id}: {e}")
     finally:
         conn.close()
+
+def get_all_parent_chunks_ordered(workspace_id: str) -> List[Dict[str, Any]]:
+    """Retrieves all parent chunks in their natural reading order (by source_id, then parent_index)."""
+    conn = get_db_connection(workspace_id)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, source_id, parent_index, text
+        FROM parent_chunks
+        ORDER BY source_id, parent_index
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    results = []
+    for r in rows:
+        results.append({
+            "id": r["id"],
+            "source_id": r["source_id"],
+            "parent_index": r["parent_index"],
+            "text": r["text"]
+        })
+    return results
+

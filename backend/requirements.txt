@@ -9,8 +9,8 @@ pytesseract>=0.3.10
 Pillow>=10.3.0
 llvmlite==0.42.0
 numba==0.59.1
-faster-whisper
-yt-dlp
+faster-whisper>=1.1.0
+yt-dlp>=2025.1.1
 requests>=2.31.0
 beautifulsoup4>=4.12.3
 playwright>=1.44.0
@@ -19,6 +19,3 @@ sentence-transformers>=3.0.1
 transformers<5.0.0
 faiss-cpu>=1.8.0
 einops>=0.8.0
-pytest>=8.0.0
-
-

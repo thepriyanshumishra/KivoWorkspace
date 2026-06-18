@@ -17,10 +17,16 @@ class ProcessingService {
 
   ProcessingService({http.Client? client}) : _client = client ?? http.Client();
 
-  Future<ProcessingStatus> startProcessing(String workspaceId) async {
-    final response = await _client.post(
-      Uri.parse('${AppConstants.backendBaseUrl}/workspaces/$workspaceId/processing/process'),
-    );
+  Future<ProcessingStatus> startProcessing(String workspaceId, {int? chunkSize, int? chunkOverlap}) async {
+    var uri = Uri.parse('${AppConstants.backendBaseUrl}/workspaces/$workspaceId/processing/process');
+    final queryParams = <String, String>{};
+    if (chunkSize != null) queryParams['chunk_size'] = chunkSize.toString();
+    if (chunkOverlap != null) queryParams['chunk_overlap'] = chunkOverlap.toString();
+    if (queryParams.isNotEmpty) {
+      uri = uri.replace(queryParameters: queryParams);
+    }
+
+    final response = await _client.post(uri);
 
     if (response.statusCode == 200) {
       return ProcessingStatus.fromJson(json.decode(utf8.decode(response.bodyBytes)));

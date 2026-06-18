@@ -144,6 +144,38 @@ async def upload_sources(
     logger.info(f"Uploaded {len(new_sources)} files to workspace {workspace_id}")
     return new_sources
 
+def get_youtube_title(url: str, video_id: str) -> str:
+    try:
+        import requests
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        response = requests.get(oembed_url, timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            title = data.get("title")
+            if title:
+                return f"YouTube: {title}"
+    except Exception as e:
+        logger.warning(f"Failed to fetch YouTube title for {video_id}: {e}")
+    return f"YouTube: {video_id}"
+
+def get_website_title(url: str, default_domain: str) -> str:
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=3)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            if soup.title and soup.title.string:
+                title = soup.title.string.strip()
+                if title:
+                    return f"Website: {title}"
+    except Exception as e:
+        logger.warning(f"Failed to fetch website title for {url}: {e}")
+    return f"Website: {default_domain}"
+
 @router.post("/youtube", response_model=Source)
 def add_youtube_source(
     workspace_id: str = Path(..., description="The unique workspace ID"),
@@ -173,9 +205,11 @@ def add_youtube_source(
             raise HTTPException(status_code=400, detail="YouTube URL already registered in this workspace")
             
     source_id = str(uuid.uuid4())
+    video_title = get_youtube_title(url, video_id)
+    
     src = Source(
         id=source_id,
-        name=f"YouTube: {video_id}",
+        name=video_title,
         type="youtube",
         path=None,
         url=url,
@@ -218,9 +252,11 @@ def add_website_source(
         domain = "Unknown Website"
         
     source_id = str(uuid.uuid4())
+    web_title = get_website_title(url, domain)
+    
     src = Source(
         id=source_id,
-        name=f"Website: {domain}",
+        name=web_title,
         type="website",
         path=None,
         url=url,

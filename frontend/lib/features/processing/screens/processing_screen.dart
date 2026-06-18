@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,8 @@ import '../../source_upload/providers/source_providers.dart';
 import '../../workspace/providers/workspace_providers.dart';
 import '../models/processing_status.dart';
 import '../providers/processing_providers.dart';
+import '../../../core/theme/theme_provider.dart';
+
 
 class ProcessingScreen extends ConsumerStatefulWidget {
   final String workspaceId;
@@ -99,6 +102,31 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
           _timer?.cancel();
           _timer = null;
           
+          // Trigger system notification if enabled
+          final notificationsOn = ref.read(notificationsEnabledProvider);
+          if (notificationsOn) {
+            try {
+              if (Platform.isMacOS) {
+                Process.run('osascript', [
+                  '-e',
+                  'display notification "Workspace ingestion is complete and ready for query." with title "Kivo Workspace" subtitle "$workspaceName" sound name "Glass"'
+                ]);
+              } else if (Platform.isWindows) {
+                Process.run('powershell', [
+                  '-Command',
+                  'Add-Type -AssemblyName System.Windows.Forms; \$bal = New-Object System.Windows.Forms.NotifyIcon; \$bal.Icon = [System.Drawing.SystemIcons]::Information; \$bal.BalloonTipTitle = "Kivo Workspace"; \$bal.BalloonTipText = "Workspace ingestion is complete and ready for query: $workspaceName"; \$bal.Visible = \$true; \$bal.ShowBalloonTip(5000)'
+                ]);
+              } else if (Platform.isLinux) {
+                Process.run('notify-send', [
+                  'Kivo Workspace',
+                  'Workspace ingestion is complete and ready for query: $workspaceName'
+                ]);
+              }
+            } catch (e) {
+              debugPrint('Failed to trigger OS notification: $e');
+            }
+          }
+
           // Automatically redirect to the chat screen
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {

@@ -8,6 +8,32 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 
 
+import os
+import platform
+
+def get_default_storage_dir() -> Path:
+    # Check if environment variable is set
+    env_dir = os.environ.get("STORAGE_DIR")
+    if env_dir:
+        return Path(env_dir)
+        
+    # Standard platforms
+    system = platform.system()
+    home = Path.home()
+    if system == "Darwin":
+        return home / "Library" / "Application Support" / "KivoWorkspace" / "storage"
+    elif system == "Windows":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "KivoWorkspace" / "storage"
+        return home / "AppData" / "Roaming" / "KivoWorkspace" / "storage"
+    else:  # Linux / FreeDesktop / Unix
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        if xdg_data:
+            return Path(xdg_data) / "KivoWorkspace" / "storage"
+        return home / ".local" / "share" / "KivoWorkspace" / "storage"
+
+
 class Settings(BaseSettings):
     """
     Kivo Workspace Backend Configuration.
@@ -20,9 +46,9 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # --- Storage ---
-    # Root storage directory, relative to backend/
-    storage_dir: Path = Path("storage")
-    workspaces_dir: Path = Path("storage/workspaces")
+    # Root storage directory, dynamically computed based on platform for production
+    storage_dir: Path = get_default_storage_dir()
+    workspaces_dir: Path = get_default_storage_dir() / "workspaces"
 
     # --- Ollama ---
     ollama_base_url: str = "http://localhost:11434"

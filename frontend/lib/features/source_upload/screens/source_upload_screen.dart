@@ -9,6 +9,9 @@ import '../providers/source_providers.dart';
 import '../../processing/services/processing_service.dart';
 import '../../../core/router/app_router.dart';
 import '../../workspace/providers/workspace_providers.dart';
+import '../../../core/theme/theme_provider.dart';
+import '../../tutorial/providers/tutorial_provider.dart';
+import '../../tutorial/screens/tutorial_overlay.dart';
 
 class SourceUploadScreen extends ConsumerStatefulWidget {
   final String workspaceId;
@@ -98,7 +101,13 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
   Future<void> _startProcessingPipeline() async {
     setState(() => _isLoading = true);
     try {
-      await ref.read(processingServiceProvider).startProcessing(widget.workspaceId);
+      final chunkSize = ref.read(ragChunkSizeProvider);
+      final chunkOverlap = ref.read(ragChunkOverlapProvider);
+      await ref.read(processingServiceProvider).startProcessing(
+        widget.workspaceId,
+        chunkSize: chunkSize,
+        chunkOverlap: chunkOverlap,
+      );
       if (mounted) {
         context.push(
           AppRoutes.processing.replaceAll(':workspaceId', widget.workspaceId),
@@ -121,6 +130,7 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
   }
 
   Widget _buildSourceCard({
+    Key? key,
     required BuildContext context,
     required IconData icon,
     required String title,
@@ -132,6 +142,7 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return MouseRegion(
+      key: key,
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: onTap,
@@ -213,11 +224,12 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
     final colors = context.colors;
     final sourcesState = ref.watch(sourcesProvider(widget.workspaceId));
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tutorialState = ref.watch(tutorialProvider);
 
     final workspaceState = ref.watch(activeWorkspaceProvider(widget.workspaceId));
     final workspaceName = workspaceState.maybeWhen(data: (w) => w.name, orElse: () => 'Workspace');
 
-    return Scaffold(
+    Widget body = Scaffold(
       backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: colors.background,
@@ -316,6 +328,7 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
                         childAspectRatio: MediaQuery.of(context).size.width < 600 ? 3.5 : 1.35,
                         children: [
                           _buildSourceCard(
+                            key: TutorialKeys.addSources,
                             context: context,
                             icon: Icons.picture_as_pdf_outlined,
                             title: 'PDF Document',
@@ -590,6 +603,22 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
           },
         ),
     );
+
+    if (tutorialState.isActive && tutorialState.currentStep == TutorialStep.addSources) {
+      body = TutorialOverlay(
+        targetKey: TutorialKeys.addSources,
+        title: 'Add Knowledge Sources',
+        description: 'Upload PDFs, text files, images (OCR), or audio (transcription). All processing happens 100% locally on your machine.',
+        onNext: () {
+          ref.read(tutorialProvider.notifier).nextStep();
+          context.go('/workspace/${widget.workspaceId}');
+        },
+        onSkip: () => ref.read(tutorialProvider.notifier).skipTutorial(),
+        child: body,
+      );
+    }
+
+    return body;
   }
 }
 

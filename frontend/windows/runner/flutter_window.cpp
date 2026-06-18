@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <commdlg.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -26,6 +27,39 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  eyedropper_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(),
+      "com.kivo.kivo_workspace/eyedropper",
+      &flutter::StandardMethodCodec::GetInstance());
+
+  eyedropper_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+        if (call.method() == "pickColor") {
+          CHOOSECOLOR cc;
+          static COLORREF acrCustClr[16];
+          ZeroMemory(&cc, sizeof(cc));
+          cc.lStructSize = sizeof(cc);
+          cc.hwndOwner = this->GetHandle();
+          cc.lpCustColors = (LPDWORD)acrCustClr;
+          cc.rgbResult = RGB(0, 117, 222);
+          cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+          if (ChooseColor(&cc) == TRUE) {
+            int r = GetRValue(cc.rgbResult);
+            int g = GetGValue(cc.rgbResult);
+            int b = GetBValue(cc.rgbResult);
+            char hex[16];
+            sprintf_s(hex, "#%02X%02X%02X", r, g, b);
+            result->Success(flutter::EncodableValue(std::string(hex)));
+          } else {
+            result->Success(flutter::EncodableValue());
+          }
+        } else {
+          result->NotImplemented();
+        }
+      });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

@@ -18,4 +18,20 @@ class ChatMessage {
     this.citations = const [],
     this.recommendedQuestions = const [],
   });
+
+  ChatMessage copyWith({
+    String? text,
+    bool? isUser,
+    DateTime? timestamp,
+    List<Citation>? citations,
+    List<String>? recommendedQuestions,
+  }) {
+    return ChatMessage(
+      text: text ?? this.text,
+      isUser: isUser ?? this.isUser,
+      timestamp: timestamp ?? this.timestamp,
+      citations: citations ?? this.citations,
+      recommendedQuestions: recommendedQuestions ?? this.recommendedQuestions,
+    );
+  }
 }

@@ -13,6 +13,8 @@ import '../../features/chat/screens/chat_screen.dart';
 import '../../features/chat/screens/multi_workspace_chat_screen.dart';
 import '../../features/processing/screens/system_health_screen.dart';
 import '../../features/workspace/screens/workspace_settings_screen.dart';
+import '../../features/onboarding/screens/onboarding_screen.dart';
+import '../../features/onboarding/screens/model_downloader_screen.dart';
 
 class AppRoutes {
   AppRoutes._();
@@ -25,6 +27,8 @@ class AppRoutes {
   static const String multiWorkspaceChat = '/multi-workspace-chat';
   static const String systemHealth = '/system-health';
   static const String workspaceSettings = '/workspace/:workspaceId/settings';
+  static const String onboarding = '/onboarding';
+  static const String modelDownloader = '/model-downloader';
 }
 
 final appRouter = GoRouter(
@@ -85,6 +89,16 @@ final appRouter = GoRouter(
         final workspaceId = state.pathParameters['workspaceId'] ?? '';
         return WorkspaceSettingsScreen(workspaceId: workspaceId);
       },
+    ),
+    GoRoute(
+      path: AppRoutes.onboarding,
+      name: 'onboarding',
+      builder: (context, state) => const OnboardingScreen(),
+    ),
+    GoRoute(
+      path: AppRoutes.modelDownloader,
+      name: 'modelDownloader',
+      builder: (context, state) => const ModelDownloaderScreen(),
     ),
   ],
 );

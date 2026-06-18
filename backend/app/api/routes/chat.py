@@ -5,6 +5,7 @@
 from fastapi import APIRouter, HTTPException, Path
 import logging
 
+from app.core.config import settings
 from app.core.retriever import retrieve_and_generate
 from app.models.chat import ChatRequest, ChatResponse
 
@@ -14,7 +15,7 @@ router = APIRouter()
 @router.post("", response_model=ChatResponse)
 def query_workspace(
     workspace_id: str = Path(..., description="The workspace ID"),
-    payload: ChatRequest = ...
+    payload: ChatRequest = None
 ):
     """
     Query the workspace RAG pipeline.
@@ -22,9 +23,15 @@ def query_workspace(
     """
     logger.info(f"Received query for workspace {workspace_id}: '{payload.message}'")
     try:
+        model_to_use = payload.model_name if payload.model_name else settings.ollama_default_model
         res = retrieve_and_generate(
             workspace_id=workspace_id,
-            question=payload.message
+            question=payload.message,
+            model_name=model_to_use,
+            is_strict=payload.is_strict,
+            temperature=payload.temperature,
+            similarity_threshold=payload.similarity_threshold,
+            ollama_url=payload.ollama_url
         )
         if res.get("routing_mode") == "ERROR" or res["answer"].startswith("Error"):
             # Check if it was a real connection error or missing index
@@ -38,7 +45,39 @@ def query_workspace(
             recommended_questions=res.get("recommended_questions", [])
         )
     except Exception as e:
-        logger.error(f"Error querying workspace {workspace_id}: {e}")
+        logger.error(f"Error querying workspace {workspace_id}: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(status_code=500, detail=f"RAG query failed: {e}")
+        raise HTTPException(status_code=500, detail="An internal error occurred while processing your query. Please try again.")
+
+@router.post("/stream")
+def query_workspace_stream(
+    workspace_id: str = Path(..., description="The workspace ID"),
+    payload: ChatRequest = None
+):
+    """
+    Query the workspace RAG pipeline with streaming.
+    Yields JSON Server-Sent Events (SSE) tokens and final citation metadata.
+    """
+    from fastapi.responses import StreamingResponse
+    from app.core.retriever import retrieve_and_generate_stream
+
+    if not payload or not payload.message:
+        raise HTTPException(status_code=400, detail="Query message cannot be empty")
+        
+    logger.info(f"Received streaming query for workspace {workspace_id}: '{payload.message}', is_strict: {payload.is_strict}")
+    
+    model_to_use = payload.model_name if payload.model_name else settings.ollama_default_model
+    return StreamingResponse(
+        retrieve_and_generate_stream(
+            workspace_id=workspace_id,
+            question=payload.message,
+            model_name=model_to_use,
+            is_strict=payload.is_strict,
+            temperature=payload.temperature,
+            similarity_threshold=payload.similarity_threshold,
+            ollama_url=payload.ollama_url
+        ),
+        media_type="text/event-stream"
+    )
+

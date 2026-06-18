@@ -109,7 +109,7 @@ app = FastAPI(
 # Allows Flutter desktop app (running on localhost) to communicate with the API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restricted to localhost in production builds
+    allow_origins=["http://localhost", "http://127.0.0.1", "file://"],  # Restricted to local origins for security
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -305,9 +305,9 @@ async def system_diagnostics():
         },
         "storage": {
             "status": storage_status,
-            "version": str(storage_path),
+            "version": "local",
             "metadata": {
-                "path": str(storage_path),
+                "path": "<local app data>",
                 "percent": percent,
                 "used_gb": used_gb,
                 "free_gb": free_gb,
@@ -323,11 +323,14 @@ from app.api.routes.workspaces import router as workspaces_router
 from app.api.routes.sources import router as sources_router
 from app.api.routes.processing import router as processing_router
 from app.api.routes.chat import router as chat_router
+from app.api.routes.universal_chat import router as universal_chat_router
 
 app.include_router(workspaces_router, prefix="/workspaces", tags=["Workspaces"])
 app.include_router(sources_router, prefix="/workspaces/{workspace_id}/sources", tags=["Sources"])
 app.include_router(processing_router, prefix="/workspaces/{workspace_id}/processing", tags=["Processing"])
 app.include_router(chat_router, prefix="/workspaces/{workspace_id}/chat", tags=["Chat"])
+app.include_router(universal_chat_router, prefix="/universal-chat", tags=["Universal Chat"])
+
 
 
 

@@ -52,8 +52,14 @@ class AppTheme {
     }
   }
 
-  static ThemeData themeFor(AppFontFamily fontFamily, {required bool isDark}) {
-    final colors = isDark ? AppColors.dark : AppColors.light;
+  static ThemeData themeFor(AppFontFamily fontFamily, {required bool isDark, Color? accentColor}) {
+    var colors = isDark ? AppColors.dark : AppColors.light;
+    if (accentColor != null) {
+      colors = colors.copyWith(
+        primary: accentColor,
+        primaryHover: accentColor,
+      );
+    }
     final baseTextTheme = isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme;
 
     return ThemeData(

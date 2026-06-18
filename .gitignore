@@ -13,14 +13,35 @@ backend/app/core/__pycache__/
 backend/app/core/processors/__pycache__/
 backend/app/models/__pycache__/
 *.pyc
+**/__pycache__/
+
+# Environment files — NEVER commit secrets
+.env
+.env.*
+*.env
+
+# Test/dev cache
+backend/.pytest_cache/
+.pytest_cache/
+*.egg-info/
+
+# Build artifacts
+frontend/build/
+dist/
+build/
+*.spec.bak
+
+# PyInstaller outputs
+backend/dist/
+backend/build/
 
 # Ignore all documentation folders
 Docs/
 docs/
 
-
 # IDEs and OS files
 .DS_Store
+**/.DS_Store
 .idea/
 .vscode/
 *.iml

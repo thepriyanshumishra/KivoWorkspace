@@ -5,7 +5,7 @@ import json
 import time
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 import faiss
 import requests
@@ -21,13 +21,19 @@ INTENT_REGEX = re.compile(
     re.IGNORECASE
 )
 
+GLOBAL_SUMMARY_REGEX = re.compile(
+    r"\b(what\s+is\s+the\s+video\s+about|what\s+is\s+this\s+video\s+about|what\s+is\s+the\s+document\s+about|what\s+is\s+this\s+document\s+about|what\s+is\s+the\s+file\s+about|what\s+is\s+this\s+file\s+about|summarize|summary|overview|what\s+is\s+this\s+about|what\s+are\s+these\s+documents\s+about|what\s+does\s+this\s+talk\s+about|what\s+is\s+the\s+content\s+of|give\s+me\s+a\s+summary|explain\s+the\s+entire|main\s+idea|main\s+theme|what\s+are\s+the\s+key\s+takeaways)\b",
+    re.IGNORECASE
+)
+
 # Token estimation helper
 def estimate_tokens(text: str) -> int:
     return int(len(text.split()) * 1.3)
 
-STANDARD_QA_PROMPT = """You are a helpful assistant. Answer the user's question based strictly on the provided context.
-If the context does not contain enough information to answer the question, state that you cannot answer based on the provided context.
-Do not make up facts or assume anything not mentioned.
+STRICT_QA_PROMPT = """You are a grounded QA assistant. Answer the user's question using the provided context chunks as your primary source of facts and references.
+Synthesize the provided context chunks to construct a helpful, accurate, and comprehensive response.
+Prioritize the facts present in the context, but write in a natural, explanatory manner. Do not invent or make up facts that are not supported by the context.
+If the context does not contain relevant information to answer the question, politely inform the user that the topic is not covered in the uploaded sources.
 
 If the workspace system instructions specify a custom language (e.g. Hindi, French, Spanish, German, etc.) or formatting constraint, you MUST translate the facts from the context and write your entire response (including explanations and sentences) strictly in that requested language/format.
 
@@ -40,15 +46,17 @@ Format your response using professional Markdown. To make your response easy to 
 
 For every factual claim you make, you MUST cite the chunk ID of the context where the information was found using the format [chunk_id] (e.g. [source_id_p0]) at the end of the sentence or statement.
 
-At the very end of your response, you MUST suggest exactly 3 relevant follow-up questions the user can ask next about the content. Format them strictly inside a <followup> tag like this:
-<followup>
-- Question 1?
-- Question 2?
-- Question 3?
-</followup>
-
 Context:
 {context}
+
+Question:
+{question}
+
+Answer:"""
+
+CREATIVE_QA_PROMPT = """You are a helpful AI assistant. Answer the user's question using your pre-trained general knowledge.
+Do not mention or cite any document chunks or source files.
+Write your response in clean Markdown.
 
 Question:
 {question}
@@ -60,7 +68,7 @@ Analyze the provided context chunks, aggregate all relevant instances, and synth
 
 If the workspace system instructions specify a custom language (e.g. Hindi, French, Spanish, German, etc.) or formatting constraint, you MUST translate the facts from the context and write your entire response (including explanations and sentences) strictly in that requested language/format.
 
-Format your response using professional Markdown. To make your response easy to read, visual, and well-structured:
+Format your response using professional Markdown:
 1. Use bold text to highlight key concepts, terms, or actions.
 2. Use bulleted lists for unordered points, and numbered lists for sequences or steps. Use lettered sub-bullets (a, b, c) if nesting is required.
 3. Use tables when presenting comparative data, key-value pairs, or structured details.
@@ -68,13 +76,6 @@ Format your response using professional Markdown. To make your response easy to 
 5. Use italics for emphasis, definitions, or quotes.
 
 For every factual claim you make, you MUST cite the chunk ID of the context where the information was found using the format [chunk_id] (e.g. [source_id_p0]) at the end of the sentence or statement.
-
-At the very end of your response, you MUST suggest exactly 3 relevant follow-up questions the user can ask next about the content. Format them strictly inside a <followup> tag like this:
-<followup>
-- Question 1?
-- Question 2?
-- Question 3?
-</followup>
 
 Context:
 {context}
@@ -84,7 +85,11 @@ Question:
 
 Answer:"""
 
-def sanitize_response(answer: str, source_id_to_name: Dict[str, str] = None) -> Tuple[str, List[Dict[str, Any]], str]:
+def sanitize_response(
+    answer: str,
+    source_id_to_name: Dict[str, str] = None,
+    parent_chunks: List[Dict[str, Any]] = None
+) -> Tuple[str, List[Dict[str, Any]], str]:
     """
     Removes XML tags, maps raw citations like [source_id_p0] to sequential footnotes like [1], [2],
     and returns the clean answer with footnotes, the citations metadata, and a completely plain text answer (no citations).
@@ -97,41 +102,56 @@ def sanitize_response(answer: str, source_id_to_name: Dict[str, str] = None) -> 
     # 1. Remove XML tags like <chunk ...> and </chunk>
     answer_clean = re.sub(r'</?chunk[^>]*>', '', answer)
     
-    # Find all raw citation tags like [uuid_p0] or [uuid_c0]
-    raw_citations = re.findall(r'\[([a-zA-Z0-9_-]+_[pc]\d+)\]', answer_clean)
+    # Find all raw citation tags like [uuid_p0], [chunk_id="uuid_p0"], etc.
+    # Pattern captures group 1 as the clean chunk ID, while the full match is the entire bracketed tag.
+    pattern = re.compile(r'\[[^\]]*?([a-zA-Z0-9_-]+_[pc]\d+)[^\]]*?\]')
+    matches = list(pattern.finditer(answer_clean))
     
     unique_citations = []
-    for cit in raw_citations:
-        if cit not in unique_citations:
-            unique_citations.append(cit)
+    full_to_clean = {}
+    for match in matches:
+        full_tag = match.group(0)
+        clean_id = match.group(1)
+        full_to_clean[full_tag] = clean_id
+        if clean_id not in unique_citations:
+            unique_citations.append(clean_id)
             
     citations_meta = []
     answer_footnoted = answer_clean
     answer_plain = answer_clean
     
-    for i, cit in enumerate(unique_citations, 1):
+    for i, clean_id in enumerate(unique_citations, 1):
         # Extract source_id from composite citation id: source_id_pX or source_id_cX
         source_id = None
-        if "_p" in cit:
-            source_id = cit.split("_p")[0]
-        elif "_c" in cit:
-            source_id = cit.split("_c")[0]
+        if "_p" in clean_id:
+            source_id = clean_id.split("_p")[0]
+        elif "_c" in clean_id:
+            source_id = clean_id.split("_c")[0]
             
         source_name = "Source Document"
         if source_id and source_id_to_name and source_id in source_id_to_name:
             source_name = source_id_to_name[source_id]
             
+        snippet = ""
+        if parent_chunks:
+            for p in parent_chunks:
+                if p["id"] == clean_id:
+                    snippet = p["text"]
+                    break
+
         citations_meta.append({
             "index": i,
-            "raw_id": cit,
+            "raw_id": clean_id,
             "source_id": source_id,
-            "source_name": source_name
+            "source_name": source_name,
+            "snippet": snippet
         })
         
-        # Replace raw citation with sequential footnote
-        answer_footnoted = answer_footnoted.replace(f"[{cit}]", f"[{i}]")
-        # Strip raw citation completely for plain text version
-        answer_plain = answer_plain.replace(f"[{cit}]", "")
+        # Replace all instances of the full tag with the footnote or empty string
+        for full_tag, cid in full_to_clean.items():
+            if cid == clean_id:
+                answer_footnoted = answer_footnoted.replace(full_tag, f"[{i}]")
+                answer_plain = answer_plain.replace(full_tag, "")
         
     # Clean up excessive spacing
     answer_footnoted = re.sub(r' +', ' ', answer_footnoted).strip()
@@ -144,132 +164,162 @@ def sanitize_response(answer: str, source_id_to_name: Dict[str, str] = None) -> 
         
     return answer_footnoted, citations_meta, answer_plain
 
-def retrieve_and_generate(
+def _prepare_rag_prompt(
     workspace_id: str,
     question: str,
-    model_name: str = "qwen2.5:1.5b",
-    max_parent_tokens: int = 3500
-) -> Dict[str, Any]:
-    """
-    Executes the Sprint 12 SQLite-based RAG Pipeline:
-    1. Dynamic Intent Routing: Detect standard QA vs Meta-Retrieval.
-    2. Vector Search & DB Lookup: Retrieve child chunks from FAISS index and fetch texts from SQLite.
-    3. Parent Reconstruction & Budgeting: Map child chunks to parents via SQLite batch queries,
-       deduplicate, and reconstruct parent context up to max_parent_tokens.
-    4. Model Generation: Query Ollama with intent-specific prompts.
-    5. Claim Sanitization: Strip XML tags, map citation markers sequentially, and construct metadata.
-    """
-    t_start = time.time()
+    max_parent_tokens: int = 2000,
+    is_strict: bool = True,
+    similarity_threshold: Optional[float] = None
+) -> Tuple[str, str, List[Dict[str, Any]], List[Dict[str, Any]], List[str], Optional[str]]:
+    refusal_msg = None
     workspace_dir = settings.workspaces_dir / workspace_id
     index_file = workspace_dir / "index.faiss"
 
     if not index_file.exists():
-        logger.warning(f"Workspace {workspace_id} FAISS index not built.")
-        return {
-            "question": question,
-            "answer": "Error: Knowledge base index is not compiled. Please process your sources first.",
-            "plain_answer": "Error: Knowledge base index is not compiled.",
-            "citations": [],
-            "child_ids": [],
-            "parent_ids": [],
-            "retrieved_child_chunks": [],
-            "retrieved_parent_chunks": [],
-            "routing_mode": "ERROR",
-            "latency_ms": int((time.time() - t_start) * 1000)
-        }
+        raise FileNotFoundError("Knowledge base index is not compiled. Please process your sources first.")
 
     # 1. Intent Routing
-    routing_mode = "STANDARD_QA"
-    k = 5
-    system_prompt = STANDARD_QA_PROMPT
-    if INTENT_REGEX.search(question):
+    is_global_summary = bool(GLOBAL_SUMMARY_REGEX.search(question))
+    routing_mode = "GLOBAL_SUMMARY" if is_global_summary else "STANDARD_QA"
+    k = 3  # Optimized Top-K
+    
+    if is_strict:
+        system_prompt = STRICT_QA_PROMPT
+    else:
+        system_prompt = CREATIVE_QA_PROMPT
+
+    if not is_global_summary and INTENT_REGEX.search(question):
         routing_mode = "META_RETRIEVAL"
-        k = 10
-        system_prompt = META_RETRIEVAL_PROMPT
+        k = 6
+        if is_strict:
+            system_prompt = STRICT_QA_PROMPT.replace("You are a grounded QA assistant.", "You are a grounded meta-retrieval assistant.")
+        else:
+            system_prompt = META_RETRIEVAL_PROMPT
 
-    logger.info(f"Question routed to {routing_mode} (Top-K={k})")
+    logger.info(f"Question routed to {routing_mode} (Top-K={k}), is_strict={is_strict}")
 
-    # Load FAISS index
-    index = faiss.read_index(str(index_file))
-
-    # 2. Vector Search (Child Chunks)
-    model = get_embedding_model()
-    query_emb = model.encode([question], normalize_embeddings=True)[0]
-    query_contiguous = query_emb.copy().astype(np.float32)
-    faiss.normalize_L2(query_contiguous.reshape(1, -1))
-
-    scores, indices = index.search(query_contiguous.reshape(1, -1), k)
-
-    valid_indices = [int(idx) for idx in indices[0] if idx >= 0]
-
-    # Load matching child chunks from SQLite
-    from app.core.database import get_child_chunks_by_global_indices, get_parent_chunks_by_ids
-    db_chunks = get_child_chunks_by_global_indices(workspace_id, valid_indices)
-    chunks_by_global_idx = {c["global_vector_index"]: c for c in db_chunks}
-
-    # Collect unique parent chunks sorted by similarity
     retrieved_child_chunks = []
-    parent_keys_seen = set()
-    parent_records = []  # List of {"score": float, "parent_id": str}
-
-    for rank, (score, chunk_idx) in enumerate(zip(scores[0], indices[0]), 1):
-        chunk_idx_int = int(chunk_idx)
-        if chunk_idx_int in chunks_by_global_idx:
-            c_chunk = chunks_by_global_idx[chunk_idx_int]
-            source_id = c_chunk["source_id"]
-            parent_id = c_chunk["parent_id"]
-            
-            c_record = {
-                "rank": rank,
-                "score": float(score),
-                "id": c_chunk["id"],
-                "text": c_chunk["text"],
-                "parent_id": parent_id
-            }
-            retrieved_child_chunks.append(c_record)
-
-            if parent_id is not None:
-                if parent_id not in parent_keys_seen:
-                    parent_keys_seen.add(parent_id)
-                    parent_records.append({
-                        "score": float(score),
-                        "parent_id": parent_id
-                    })
-
-    # Sort parent records in descending order of child chunk similarity score
-    parent_records.sort(key=lambda x: x["score"], reverse=True)
-
-    # 3. Load Parents and enforce budget
-    parent_ids = [r["parent_id"] for r in parent_records if r["parent_id"] is not None]
-    db_parents = get_parent_chunks_by_ids(workspace_id, parent_ids)
-    parents_by_id = {p["id"]: p["text"] for p in db_parents}
-
-    context_parts = []
     retrieved_parent_chunks = []
-    current_tokens = 0
     parent_ids_used = []
+    context_parts = []
 
-    for p_rec in parent_records:
-        p_id = p_rec["parent_id"]
-        if p_id in parents_by_id:
-            p_text = parents_by_id[p_id]
+    if is_global_summary:
+        # Load sequential parent chunks from SQLite instead of doing similarity search
+        from app.core.database import get_all_parent_chunks_ordered
+        try:
+            db_parents = get_all_parent_chunks_ordered(workspace_id)
+        except FileNotFoundError:
+            raise FileNotFoundError("Workspace has been deleted.")
+        except Exception as e:
+            logger.error(f"Error loading sequential parent chunks: {e}")
+            db_parents = []
+
+        current_tokens = 0
+        for p in db_parents:
+            p_text = p["text"]
             p_tokens = estimate_tokens(p_text)
-            
-            # Check context budget
             if current_tokens + p_tokens > max_parent_tokens:
-                logger.info(f"Parent chunk {p_id} ({p_tokens} tokens) excluded. Adding it would exceed budget ({current_tokens + p_tokens} > {max_parent_tokens}).")
+                logger.info(f"Parent chunk {p['id']} excluded. Adding it would exceed budget ({current_tokens + p_tokens} > {max_parent_tokens}).")
                 continue
-
             current_tokens += p_tokens
-            context_parts.append(f'<chunk id="{p_id}">\n{p_text}\n</chunk>')
-            parent_ids_used.append(p_id)
+            context_parts.append(f'<chunk id="{p["id"]}">\n{p_text}\n</chunk>')
+            parent_ids_used.append(p["id"])
             retrieved_parent_chunks.append({
-                "id": p_id,
+                "id": p["id"],
                 "text": p_text,
-                "score": p_rec["score"]
+                "score": 1.0
             })
+    else:
+        # Load FAISS index
+        if not index_file.exists():
+            raise FileNotFoundError("Knowledge base index is not compiled. Please process your sources first.")
+        index = faiss.read_index(str(index_file))
+
+        # 2. Vector Search (Child Chunks)
+        model = get_embedding_model()
+        query_emb = model.encode([question], normalize_embeddings=True)[0]
+        query_contiguous = query_emb.copy().astype(np.float32)
+        faiss.normalize_L2(query_contiguous.reshape(1, -1))
+
+        scores, indices = index.search(query_contiguous.reshape(1, -1), k)
+        
+        # Early check for strict mode: similarity score threshold
+        threshold = similarity_threshold if similarity_threshold is not None else 0.25
+        if is_strict:
+            if len(scores) == 0 or len(scores[0]) == 0 or scores[0][0] < threshold:
+                refusal_msg = "This topic is not present in the uploaded sources. Try turning off Strict Source Mode to search using general AI knowledge."
+                return "", routing_mode, [], [], [], refusal_msg
+
+        valid_indices = [int(idx) for idx in indices[0] if idx >= 0]
+
+        # Load matching child chunks from SQLite
+        from app.core.database import get_child_chunks_by_global_indices, get_parent_chunks_by_ids
+        db_chunks = get_child_chunks_by_global_indices(workspace_id, valid_indices)
+        chunks_by_global_idx = {c["global_vector_index"]: c for c in db_chunks}
+
+        # Collect unique parent chunks sorted by similarity
+        parent_keys_seen = set()
+        parent_records = []  # List of {"score": float, "parent_id": str}
+
+        for rank, (score, chunk_idx) in enumerate(zip(scores[0], indices[0]), 1):
+            chunk_idx_int = int(chunk_idx)
+            if chunk_idx_int in chunks_by_global_idx:
+                c_chunk = chunks_by_global_idx[chunk_idx_int]
+                parent_id = c_chunk["parent_id"]
+                
+                c_record = {
+                    "rank": rank,
+                    "score": float(score),
+                    "id": c_chunk["id"],
+                    "text": c_chunk["text"],
+                    "parent_id": parent_id
+                }
+                retrieved_child_chunks.append(c_record)
+
+                if parent_id is not None:
+                    if parent_id not in parent_keys_seen:
+                        parent_keys_seen.add(parent_id)
+                        parent_records.append({
+                            "score": float(score),
+                            "parent_id": parent_id
+                        })
+
+        # Sort parent records in descending order of child chunk similarity score
+        parent_records.sort(key=lambda x: x["score"], reverse=True)
+
+        # 3. Load Parents and enforce budget (max 2000 tokens for context budgeting)
+        parent_ids = [r["parent_id"] for r in parent_records if r["parent_id"] is not None]
+        db_parents = get_parent_chunks_by_ids(workspace_id, parent_ids)
+        parents_by_id = {p["id"]: p["text"] for p in db_parents}
+
+        current_tokens = 0
+        for p_rec in parent_records:
+            p_id = p_rec["parent_id"]
+            if p_id in parents_by_id:
+                p_text = parents_by_id[p_id]
+                p_tokens = estimate_tokens(p_text)
+                
+                # Check context budget
+                if current_tokens + p_tokens > max_parent_tokens:
+                    logger.info(f"Parent chunk {p_id} ({p_tokens} tokens) excluded. Adding it would exceed budget ({current_tokens + p_tokens} > {max_parent_tokens}).")
+                    continue
+
+                current_tokens += p_tokens
+                context_parts.append(f'<chunk id="{p_id}">\n{p_text}\n</chunk>')
+                parent_ids_used.append(p_id)
+                retrieved_parent_chunks.append({
+                    "id": p_id,
+                    "text": p_text,
+                    "score": p_rec["score"]
+                })
 
     context_str = "\n".join(context_parts)
+
+    # Check for empty context in strict mode
+    if is_strict:
+        if len(retrieved_parent_chunks) == 0:
+            refusal_msg = "This topic is not present in the uploaded sources. Try turning off Strict Source Mode to search using general AI knowledge."
+            return "", routing_mode, retrieved_child_chunks, [], [], refusal_msg
 
     # 4. Load Custom Workspace Instructions
     instructions = ""
@@ -284,20 +334,125 @@ def retrieve_and_generate(
 
     # Inject workspace instructions if present
     if instructions:
-        # 1. Top Reinforcement: prepend to system prompt
         system_prompt = f"CRITICAL WORKSPACE SYSTEM INSTRUCTIONS:\n- {instructions}\n\n" + system_prompt
-        # 2. Bottom Reinforcement: append directly above Answer:
         instruction_block = f"\nCRITICAL CUSTOM INSTRUCTION (Apply this strictly to your answer): {instructions}\n"
         system_prompt = system_prompt.replace("Answer:", f"{instruction_block}\nAnswer:")
 
     prompt = system_prompt.format(context=context_str, question=question)
-    url = f"{settings.ollama_base_url}/api/generate"
+    return prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg
+
+def retrieve_and_generate(
+    workspace_id: str,
+    question: str,
+    model_name: str = "qwen2.5:1.5b",
+    max_parent_tokens: int = 2000,
+    is_strict: bool = True,
+    temperature: Optional[float] = None,
+    similarity_threshold: Optional[float] = None,
+    ollama_url: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Executes RAG and generates answer synchronously.
+    """
+    t_start = time.time()
+    
+    if not is_strict:
+        # Bypassing RAG entirely for Creative Mode
+        instructions = ""
+        workspace_dir = settings.workspaces_dir / workspace_id
+        metadata_file = workspace_dir / "metadata.json"
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, "r") as f:
+                    meta_data = json.load(f)
+                    instructions = meta_data.get("instructions", "").strip()
+            except Exception as e:
+                logger.error(f"Failed to read instructions from metadata for {workspace_id}: {e}")
+
+        system_prompt = "You are a helpful AI assistant. Answer the user's question using your pre-trained general knowledge. Do not mention or cite any document chunks or source files. Write your response in clean Markdown."
+        if instructions:
+            system_prompt = f"CRITICAL WORKSPACE SYSTEM INSTRUCTIONS:\n- {instructions}\n\n" + system_prompt
+            
+        prompt = f"{system_prompt}\n\nQuestion:\n{question}\n\nAnswer:"
+        
+        base_url = ollama_url if ollama_url else settings.ollama_base_url
+        url = f"{base_url}/api/generate"
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature if temperature is not None else 0.7
+            }
+        }
+        
+        raw_answer = ""
+        try:
+            response = requests.post(url, json=payload, timeout=180)
+            if response.status_code == 200:
+                result = response.json()
+                raw_answer = result.get("response", "").strip()
+            else:
+                raw_answer = f"Error: Ollama returned status code {response.status_code}"
+        except Exception as e:
+            raw_answer = f"Error calling Ollama API: {e}"
+            
+        return {
+            "question": question,
+            "answer": raw_answer,
+            "plain_answer": raw_answer,
+            "citations": [],
+            "child_ids": [],
+            "parent_ids": [],
+            "retrieved_child_chunks": [],
+            "retrieved_parent_chunks": [],
+            "routing_mode": "CREATIVE_CHAT",
+            "latency_ms": int((time.time() - t_start) * 1000),
+            "recommended_questions": []
+        }
+
+    try:
+        prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg = _prepare_rag_prompt(
+            workspace_id, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            similarity_threshold=similarity_threshold
+        )
+    except FileNotFoundError as fnf:
+        return {
+            "question": question,
+            "answer": str(fnf),
+            "plain_answer": str(fnf),
+            "citations": [],
+            "child_ids": [],
+            "parent_ids": [],
+            "retrieved_child_chunks": [],
+            "retrieved_parent_chunks": [],
+            "routing_mode": "ERROR",
+            "latency_ms": int((time.time() - t_start) * 1000)
+        }
+
+    if refusal_msg:
+        return {
+            "question": question,
+            "answer": refusal_msg,
+            "plain_answer": refusal_msg,
+            "citations": [],
+            "child_ids": [c["id"] for c in retrieved_child_chunks],
+            "parent_ids": parent_ids_used,
+            "retrieved_child_chunks": retrieved_child_chunks,
+            "retrieved_parent_chunks": retrieved_parent_chunks,
+            "routing_mode": routing_mode,
+            "latency_ms": int((time.time() - t_start) * 1000),
+            "recommended_questions": []
+        }
+
+    base_url = ollama_url if ollama_url else settings.ollama_base_url
+    url = f"{base_url}/api/generate"
     payload = {
         "model": model_name,
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": 0.0
+            "temperature": temperature if temperature is not None else 0.0
         }
     }
 
@@ -312,45 +467,6 @@ def retrieve_and_generate(
     except Exception as e:
         raw_answer = f"Error calling Ollama API: {e}"
 
-    # Parse recommended follow-up questions from Ollama response
-    recommended_questions = []
-    followup_match = re.search(r'<followup>(.*?)</followup>', raw_answer, re.DOTALL | re.IGNORECASE)
-    if followup_match:
-        followup_content = followup_match.group(1)
-        # Find lines starting with a bullet or number
-        for line in followup_content.split('\n'):
-            line_clean = line.strip().lstrip('-').lstrip('*').strip()
-            if line_clean:
-                # Remove leading numbers like "1. "
-                line_clean = re.sub(r'^\d+\.\s*', '', line_clean).strip()
-                if line_clean:
-                    recommended_questions.append(line_clean)
-        # Remove the <followup> tag and its contents from the raw answer
-        raw_answer = raw_answer.replace(followup_match.group(0), "").strip()
-
-    # Generate robust fallbacks if Ollama didn't output the followup questions
-    if len(recommended_questions) < 3:
-        q_lower = question.lower()
-        if "git" in q_lower or "github" in q_lower:
-            recommended_questions = [
-                "What is a git branch and how do I create one?",
-                "What is the difference between git merge and git rebase?",
-                "How do I configure a remote repository on GitHub?"
-            ]
-        elif "summary" in q_lower or "about" in q_lower or "what is" in q_lower:
-            recommended_questions = [
-                "What are the most important sections of this document?",
-                "Can you list the key concepts explained in this file?",
-                "Who are the main figures or organizations discussed?"
-            ]
-        else:
-            recommended_questions = [
-                "Can you explain the main points of this document in detail?",
-                "What are the key terms or definitions used here?",
-                "Provide a bulleted summary of this reference."
-            ]
-    recommended_questions = recommended_questions[:3]
-
     # Load sources to get source names for citation metadata
     from app.api.routes.sources import load_sources
     try:
@@ -360,8 +476,7 @@ def retrieve_and_generate(
         source_id_to_name = {}
 
     # 5. Claim Sanitization
-    answer_footnoted, citations_meta, answer_plain = sanitize_response(raw_answer, source_id_to_name)
-
+    answer_footnoted, citations_meta, answer_plain = sanitize_response(raw_answer, source_id_to_name, retrieved_parent_chunks)
     latency_ms = int((time.time() - t_start) * 1000)
 
     return {
@@ -375,5 +490,629 @@ def retrieve_and_generate(
         "retrieved_parent_chunks": retrieved_parent_chunks,
         "routing_mode": routing_mode,
         "latency_ms": latency_ms,
-        "recommended_questions": recommended_questions
+        "recommended_questions": []
     }
+
+def retrieve_and_generate_stream(
+    workspace_id: str,
+    question: str,
+    model_name: str = "qwen2.5:1.5b",
+    max_parent_tokens: int = 2000,
+    is_strict: bool = True,
+    temperature: Optional[float] = None,
+    similarity_threshold: Optional[float] = None,
+    ollama_url: Optional[str] = None
+):
+    """
+    Executes RAG and yields Server-Sent Events (SSE) token chunks.
+    """
+    t_start = time.time()
+    
+    if not is_strict:
+        # Bypassing RAG entirely for Creative Mode
+        instructions = ""
+        workspace_dir = settings.workspaces_dir / workspace_id
+        metadata_file = workspace_dir / "metadata.json"
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, "r") as f:
+                    meta_data = json.load(f)
+                    instructions = meta_data.get("instructions", "").strip()
+            except Exception as e:
+                logger.error(f"Failed to read instructions from metadata for {workspace_id}: {e}")
+
+        system_prompt = "You are a helpful AI assistant. Answer the user's question using your pre-trained general knowledge. Do not mention or cite any document chunks or source files. Write your response in clean Markdown."
+        if instructions:
+            system_prompt = f"CRITICAL WORKSPACE SYSTEM INSTRUCTIONS:\n- {instructions}\n\n" + system_prompt
+            
+        prompt = f"{system_prompt}\n\nQuestion:\n{question}\n\nAnswer:"
+
+        base_url = ollama_url if ollama_url else settings.ollama_base_url
+        url = f"{base_url}/api/generate"
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": True,
+            "options": {
+                "temperature": temperature if temperature is not None else 0.7
+            }
+        }
+
+        full_text_buffer = ""
+        try:
+            response = requests.post(url, json=payload, stream=True, timeout=180)
+            if response.status_code != 200:
+                yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+                return
+                
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line.decode('utf-8'))
+                    token = data.get("response", "")
+                    yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                    full_text_buffer += token
+
+        except Exception as e:
+            yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
+            return
+
+        latency_ms = int((time.time() - t_start) * 1000)
+        yield f"data: {json.dumps({'done': True, 'answer': full_text_buffer.strip(), 'plain_answer': full_text_buffer.strip(), 'citations': [], 'recommended_questions': [], 'latency_ms': latency_ms})}\n\n"
+        return
+
+    try:
+        prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg = _prepare_rag_prompt(
+            workspace_id, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            similarity_threshold=similarity_threshold
+        )
+    except FileNotFoundError as fnf:
+        yield f"data: {json.dumps({'token': str(fnf), 'done': True, 'error': True})}\n\n"
+        return
+    except Exception as e:
+        yield f"data: {json.dumps({'token': f'Error preparing prompt: {e}', 'done': True, 'error': True})}\n\n"
+        return
+
+    if refusal_msg:
+        words = refusal_msg.split(" ")
+        for i, w in enumerate(words):
+            chunk = (w + " ") if i < len(words) - 1 else w
+            yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
+            time.sleep(0.01)
+        yield f"data: {json.dumps({'done': True, 'answer': refusal_msg, 'plain_answer': refusal_msg, 'citations': [], 'recommended_questions': [], 'latency_ms': int((time.time() - t_start) * 1000)})}\n\n"
+        return
+
+    base_url = ollama_url if ollama_url else settings.ollama_base_url
+    url = f"{base_url}/api/generate"
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": True,
+        "options": {
+            "temperature": temperature if temperature is not None else 0.0
+        }
+    }
+
+    full_text_buffer = ""
+    try:
+        response = requests.post(url, json=payload, stream=True, timeout=180)
+        if response.status_code != 200:
+            yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+            return
+            
+        for line in response.iter_lines():
+            if line:
+                data = json.loads(line.decode('utf-8'))
+                token = data.get("response", "")
+                yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                full_text_buffer += token
+
+    except Exception as e:
+        yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
+        return
+
+    # Load source names for citation mapping
+    from app.api.routes.sources import load_sources
+    try:
+        sources = load_sources(workspace_id)
+        source_id_to_name = {s.id: s.name for s in sources}
+    except Exception:
+        source_id_to_name = {}
+
+    answer_footnoted, citations_meta, answer_plain = sanitize_response(full_text_buffer.strip(), source_id_to_name, retrieved_parent_chunks)
+    latency_ms = int((time.time() - t_start) * 1000)
+
+    # Yield the final control message with all citations and followups
+    yield f"data: {json.dumps({'done': True, 'answer': answer_footnoted, 'plain_answer': answer_plain, 'citations': citations_meta, 'recommended_questions': [], 'latency_ms': latency_ms})}\n\n"
+
+
+def _prepare_universal_rag_prompt(
+    workspace_ids: List[str],
+    question: str,
+    max_parent_tokens: int = 2000,
+    is_strict: bool = True,
+    similarity_threshold: Optional[float] = None
+) -> Tuple[str, str, List[Dict[str, Any]], List[Dict[str, Any]], List[str], Optional[str], Dict[str, str]]:
+    refusal_msg = None
+    is_global_summary = bool(GLOBAL_SUMMARY_REGEX.search(question))
+    routing_mode = "GLOBAL_SUMMARY" if is_global_summary else "STANDARD_QA"
+    k = 4  # Top-K child chunks per workspace to fetch
+    
+    if is_strict:
+        system_prompt = STRICT_QA_PROMPT
+    else:
+        system_prompt = CREATIVE_QA_PROMPT
+
+    if not is_global_summary and INTENT_REGEX.search(question):
+        routing_mode = "META_RETRIEVAL"
+        k = 8
+        if is_strict:
+            system_prompt = STRICT_QA_PROMPT.replace("You are a grounded QA assistant.", "You are a grounded meta-retrieval assistant.")
+        else:
+            system_prompt = META_RETRIEVAL_PROMPT
+
+    logger.info(f"Universal Question routed to {routing_mode} (per-workspace Top-K={k}), is_strict={is_strict}")
+
+    all_child_chunks = []
+    workspace_names = {}
+    source_id_to_name = {}
+    workspace_instructions = []
+
+    # First load workspace names and instructions
+    for ws_id in workspace_ids:
+        workspace_dir = settings.workspaces_dir / ws_id
+        metadata_file = workspace_dir / "metadata.json"
+
+        ws_name = ws_id
+        if metadata_file.exists():
+            try:
+                with open(metadata_file, "r") as f:
+                    meta_data = json.load(f)
+                    ws_name = meta_data.get("name", ws_id)
+                    inst = meta_data.get("instructions", "").strip()
+                    if inst:
+                        workspace_instructions.append(f"Workspace '{ws_name}' Instructions: {inst}")
+            except Exception as e:
+                logger.error(f"Failed to read metadata for workspace {ws_id}: {e}")
+        workspace_names[ws_id] = ws_name
+
+    context_parts = []
+    retrieved_parent_chunks = []
+    parent_ids_used = []
+
+    if is_global_summary:
+        from app.core.database import get_all_parent_chunks_ordered
+        current_tokens = 0
+        for ws_id in workspace_ids:
+            ws_name = workspace_names.get(ws_id, ws_id)
+            try:
+                db_parents = get_all_parent_chunks_ordered(ws_id)
+            except Exception as e:
+                logger.error(f"Error loading sequential parent chunks for universal workspace {ws_id}: {e}")
+                db_parents = []
+            
+            for p in db_parents:
+                p_text = p["text"]
+                p_tokens = estimate_tokens(p_text)
+                if current_tokens + p_tokens > max_parent_tokens:
+                    logger.info(f"Universal parent chunk {p['id']} excluded due to budget.")
+                    continue
+                current_tokens += p_tokens
+                context_parts.append(f'<chunk id="{p["id"]}" workspace="{ws_name}">\n{p_text}\n</chunk>')
+                parent_ids_used.append(p["id"])
+                retrieved_parent_chunks.append({
+                    "id": p["id"],
+                    "text": p_text,
+                    "score": 1.0,
+                    "workspace_id": ws_id,
+                    "workspace_name": ws_name
+                })
+    else:
+        # Generate query embedding
+        model = get_embedding_model()
+        query_emb = model.encode([question], normalize_embeddings=True)[0]
+        query_contiguous = query_emb.copy().astype(np.float32)
+        faiss.normalize_L2(query_contiguous.reshape(1, -1))
+
+        # Loop over all requested workspace IDs for vector search
+        for ws_id in workspace_ids:
+            workspace_dir = settings.workspaces_dir / ws_id
+            index_file = workspace_dir / "index.faiss"
+
+            if not index_file.exists():
+                logger.warning(f"Index not found for workspace {ws_id}, skipping vector search.")
+                continue
+
+            try:
+                index = faiss.read_index(str(index_file))
+                scores, indices = index.search(query_contiguous.reshape(1, -1), k)
+                valid_indices = [int(idx) for idx in indices[0] if idx >= 0]
+                
+                if not valid_indices:
+                    continue
+
+                from app.core.database import get_child_chunks_by_global_indices
+                db_chunks = get_child_chunks_by_global_indices(ws_id, valid_indices)
+                chunks_by_global_idx = {c["global_vector_index"]: c for c in db_chunks}
+
+                for rank, (score, chunk_idx) in enumerate(zip(scores[0], indices[0]), 1):
+                    chunk_idx_int = int(chunk_idx)
+                    if chunk_idx_int in chunks_by_global_idx:
+                        c_chunk = chunks_by_global_idx[chunk_idx_int]
+                        all_child_chunks.append({
+                            "workspace_id": ws_id,
+                            "workspace_name": workspace_names.get(ws_id, ws_id),
+                            "rank_local": rank,
+                            "score": float(score),
+                            "id": c_chunk["id"],
+                            "text": c_chunk["text"],
+                            "parent_id": c_chunk["parent_id"]
+                        })
+                
+                from app.api.routes.sources import load_sources
+                try:
+                    sources = load_sources(ws_id)
+                    for s in sources:
+                        source_id_to_name[s.id] = f"{workspace_names.get(ws_id, ws_id)} > {s.name}"
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.error(f"Error performing vector search in workspace {ws_id}: {e}")
+
+        all_child_chunks.sort(key=lambda x: x["score"], reverse=True)
+
+        threshold = similarity_threshold if similarity_threshold is not None else 0.25
+        if is_strict:
+            if len(all_child_chunks) == 0 or all_child_chunks[0]["score"] < threshold:
+                refusal_msg = "This topic is not present in the uploaded sources. Try turning off Strict Source Mode to search using general AI knowledge."
+                return "", routing_mode, [], [], [], refusal_msg, source_id_to_name
+
+        parent_records = []
+        parent_keys_seen = set()
+
+        for c in all_child_chunks:
+            parent_id = c["parent_id"]
+            ws_id = c["workspace_id"]
+            if parent_id is not None:
+                key = f"{ws_id}_{parent_id}"
+                if key not in parent_keys_seen:
+                    parent_keys_seen.add(key)
+                    parent_records.append({
+                        "score": c["score"],
+                        "parent_id": parent_id,
+                        "workspace_id": ws_id,
+                        "workspace_name": c["workspace_name"]
+                    })
+
+        parent_records.sort(key=lambda x: x["score"], reverse=True)
+
+        from app.core.database import get_parent_chunks_by_ids
+        parents_by_workspace_and_id = {}
+
+        for ws_id in workspace_ids:
+            ws_parent_ids = [r["parent_id"] for r in parent_records if r["workspace_id"] == ws_id]
+            if ws_parent_ids:
+                try:
+                    db_parents = get_parent_chunks_by_ids(ws_id, ws_parent_ids)
+                    parents_by_workspace_and_id[ws_id] = {p["id"]: p["text"] for p in db_parents}
+                except Exception as e:
+                    logger.error(f"Failed to load parent chunks for workspace {ws_id}: {e}")
+
+        current_tokens = 0
+        for p_rec in parent_records:
+            ws_id = p_rec["workspace_id"]
+            p_id = p_rec["parent_id"]
+            ws_name = p_rec["workspace_name"]
+            
+            ws_parents = parents_by_workspace_and_id.get(ws_id, {})
+            if p_id in ws_parents:
+                p_text = ws_parents[p_id]
+                p_tokens = estimate_tokens(p_text)
+
+                if current_tokens + p_tokens > max_parent_tokens:
+                    logger.info(f"Parent chunk {p_id} from {ws_name} excluded due to budget.")
+                    continue
+
+                current_tokens += p_tokens
+                context_parts.append(f'<chunk id="{p_id}" workspace="{ws_name}">\n{p_text}\n</chunk>')
+                parent_ids_used.append(p_id)
+                retrieved_parent_chunks.append({
+                    "id": p_id,
+                    "text": p_text,
+                    "score": p_rec["score"],
+                    "workspace_id": ws_id,
+                    "workspace_name": ws_name
+                })
+
+    context_str = "\n".join(context_parts)
+
+    if is_strict:
+        if len(retrieved_parent_chunks) == 0:
+            refusal_msg = "This topic is not present in the uploaded sources. Try turning off Strict Source Mode to search using general AI knowledge."
+            return "", routing_mode, all_child_chunks, [], [], refusal_msg, source_id_to_name
+
+    instructions = "\n".join(workspace_instructions).strip()
+    if instructions:
+        system_prompt = f"CRITICAL WORKSPACE SYSTEM INSTRUCTIONS:\n{instructions}\n\n" + system_prompt
+        instruction_block = f"\nCRITICAL CUSTOM INSTRUCTION (Apply this strictly to your answer): {instructions}\n"
+        system_prompt = system_prompt.replace("Answer:", f"{instruction_block}\nAnswer:")
+
+    prompt = system_prompt.format(context=context_str, question=question)
+    return prompt, routing_mode, all_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg, source_id_to_name
+
+
+def retrieve_and_generate_universal(
+    workspace_ids: List[str],
+    question: str,
+    model_name: str = "qwen2.5:1.5b",
+    max_parent_tokens: int = 2000,
+    is_strict: bool = True,
+    temperature: Optional[float] = None,
+    similarity_threshold: Optional[float] = None,
+    ollama_url: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Executes RAG across multiple workspaces and generates answer synchronously.
+    """
+    t_start = time.time()
+    
+    if not is_strict:
+        # Bypassing RAG entirely for Creative Mode
+        workspace_instructions = []
+        for ws_id in workspace_ids:
+            workspace_dir = settings.workspaces_dir / ws_id
+            metadata_file = workspace_dir / "metadata.json"
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file, "r") as f:
+                        meta_data = json.load(f)
+                        ws_name = meta_data.get("name", ws_id)
+                        inst = meta_data.get("instructions", "").strip()
+                        if inst:
+                            workspace_instructions.append(f"Workspace '{ws_name}' Instructions: {inst}")
+                except Exception as e:
+                    logger.error(f"Failed to read metadata for workspace {ws_id}: {e}")
+        
+        system_prompt = "You are a helpful AI assistant. Answer the user's question using your pre-trained general knowledge. Do not mention or cite any document chunks or source files. Write your response in clean Markdown."
+        if workspace_instructions:
+            instructions_str = "\n".join(workspace_instructions).strip()
+            system_prompt = f"CRITICAL WORKSPACE SYSTEM INSTRUCTIONS:\n{instructions_str}\n\n" + system_prompt
+            
+        prompt = f"{system_prompt}\n\nQuestion:\n{question}\n\nAnswer:"
+
+        base_url = ollama_url if ollama_url else settings.ollama_base_url
+        url = f"{base_url}/api/generate"
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature if temperature is not None else 0.7
+            }
+        }
+
+        raw_answer = ""
+        try:
+            response = requests.post(url, json=payload, timeout=180)
+            if response.status_code == 200:
+                result = response.json()
+                raw_answer = result.get("response", "").strip()
+            else:
+                raw_answer = f"Error: Ollama returned status code {response.status_code}"
+        except Exception as e:
+            raw_answer = f"Error calling Ollama API: {e}"
+
+        return {
+            "question": question,
+            "answer": raw_answer,
+            "plain_answer": raw_answer,
+            "citations": [],
+            "child_ids": [],
+            "parent_ids": [],
+            "retrieved_child_chunks": [],
+            "retrieved_parent_chunks": [],
+            "routing_mode": "CREATIVE_CHAT",
+            "latency_ms": int((time.time() - t_start) * 1000),
+            "recommended_questions": []
+        }
+
+    try:
+        prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg, source_id_to_name = _prepare_universal_rag_prompt(
+            workspace_ids, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            similarity_threshold=similarity_threshold
+        )
+    except Exception as e:
+        err_msg = f"Universal RAG failed: {e}"
+        return {
+            "question": question,
+            "answer": err_msg,
+            "plain_answer": err_msg,
+            "citations": [],
+            "child_ids": [],
+            "parent_ids": [],
+            "retrieved_child_chunks": [],
+            "retrieved_parent_chunks": [],
+            "routing_mode": "ERROR",
+            "latency_ms": int((time.time() - t_start) * 1000)
+        }
+
+    if refusal_msg:
+        return {
+            "question": question,
+            "answer": refusal_msg,
+            "plain_answer": refusal_msg,
+            "citations": [],
+            "child_ids": [c["id"] for c in retrieved_child_chunks],
+            "parent_ids": parent_ids_used,
+            "retrieved_child_chunks": retrieved_child_chunks,
+            "retrieved_parent_chunks": retrieved_parent_chunks,
+            "routing_mode": routing_mode,
+            "latency_ms": int((time.time() - t_start) * 1000),
+            "recommended_questions": []
+        }
+
+    base_url = ollama_url if ollama_url else settings.ollama_base_url
+    url = f"{base_url}/api/generate"
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": temperature if temperature is not None else 0.0
+        }
+    }
+
+    raw_answer = ""
+    try:
+        response = requests.post(url, json=payload, timeout=180)
+        if response.status_code == 200:
+            result = response.json()
+            raw_answer = result.get("response", "").strip()
+        else:
+            raw_answer = f"Error: Ollama returned status code {response.status_code}"
+    except Exception as e:
+        raw_answer = f"Error calling Ollama API: {e}"
+
+    # Claim Sanitization
+    answer_footnoted, citations_meta, answer_plain = sanitize_response(raw_answer, source_id_to_name, retrieved_parent_chunks)
+    latency_ms = int((time.time() - t_start) * 1000)
+
+    return {
+        "question": question,
+        "answer": answer_footnoted,
+        "plain_answer": answer_plain,
+        "citations": citations_meta,
+        "child_ids": [c["id"] for c in retrieved_child_chunks],
+        "parent_ids": parent_ids_used,
+        "retrieved_child_chunks": retrieved_child_chunks,
+        "retrieved_parent_chunks": retrieved_parent_chunks,
+        "routing_mode": routing_mode,
+        "latency_ms": latency_ms,
+        "recommended_questions": []
+    }
+
+
+def retrieve_and_generate_universal_stream(
+    workspace_ids: List[str],
+    question: str,
+    model_name: str = "qwen2.5:1.5b",
+    max_parent_tokens: int = 2000,
+    is_strict: bool = True,
+    temperature: Optional[float] = None,
+    similarity_threshold: Optional[float] = None,
+    ollama_url: Optional[str] = None
+):
+    """
+    Executes universal RAG and yields Server-Sent Events (SSE) token chunks.
+    """
+    t_start = time.time()
+    
+    if not is_strict:
+        # Bypassing RAG entirely for Creative Mode
+        workspace_instructions = []
+        for ws_id in workspace_ids:
+            workspace_dir = settings.workspaces_dir / ws_id
+            metadata_file = workspace_dir / "metadata.json"
+            if metadata_file.exists():
+                try:
+                    with open(metadata_file, "r") as f:
+                        meta_data = json.load(f)
+                        ws_name = meta_data.get("name", ws_id)
+                        inst = meta_data.get("instructions", "").strip()
+                        if inst:
+                            workspace_instructions.append(f"Workspace '{ws_name}' Instructions: {inst}")
+                except Exception as e:
+                    logger.error(f"Failed to read metadata for workspace {ws_id}: {e}")
+        
+        system_prompt = "You are a helpful AI assistant. Answer the user's question using your pre-trained general knowledge. Do not mention or cite any document chunks or source files. Write your response in clean Markdown."
+        if workspace_instructions:
+            instructions_str = "\n".join(workspace_instructions).strip()
+            system_prompt = f"CRITICAL WORKSPACE SYSTEM INSTRUCTIONS:\n{instructions_str}\n\n" + system_prompt
+            
+        prompt = f"{system_prompt}\n\nQuestion:\n{question}\n\nAnswer:"
+
+        base_url = ollama_url if ollama_url else settings.ollama_base_url
+        url = f"{base_url}/api/generate"
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": True,
+            "options": {
+                "temperature": temperature if temperature is not None else 0.7
+            }
+        }
+
+        full_text_buffer = ""
+        try:
+            response = requests.post(url, json=payload, stream=True, timeout=180)
+            if response.status_code != 200:
+                yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+                return
+                
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line.decode('utf-8'))
+                    token = data.get("response", "")
+                    yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                    full_text_buffer += token
+
+        except Exception as e:
+            yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
+            return
+
+        latency_ms = int((time.time() - t_start) * 1000)
+        yield f"data: {json.dumps({'done': True, 'answer': full_text_buffer.strip(), 'plain_answer': full_text_buffer.strip(), 'citations': [], 'recommended_questions': [], 'latency_ms': latency_ms})}\n\n"
+        return
+
+    try:
+        prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg, source_id_to_name = _prepare_universal_rag_prompt(
+            workspace_ids, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            similarity_threshold=similarity_threshold
+        )
+    except Exception as e:
+        yield f"data: {json.dumps({'token': f'Error preparing prompt: {e}', 'done': True, 'error': True})}\n\n"
+        return
+
+    if refusal_msg:
+        words = refusal_msg.split(" ")
+        for i, w in enumerate(words):
+            chunk = (w + " ") if i < len(words) - 1 else w
+            yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
+            time.sleep(0.01)
+        yield f"data: {json.dumps({'done': True, 'answer': refusal_msg, 'plain_answer': refusal_msg, 'citations': [], 'recommended_questions': [], 'latency_ms': int((time.time() - t_start) * 1000)})}\n\n"
+        return
+
+    base_url = ollama_url if ollama_url else settings.ollama_base_url
+    url = f"{base_url}/api/generate"
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": True,
+        "options": {
+            "temperature": temperature if temperature is not None else 0.0
+        }
+    }
+
+    full_text_buffer = ""
+    try:
+        response = requests.post(url, json=payload, stream=True, timeout=180)
+        if response.status_code != 200:
+            yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+            return
+            
+        for line in response.iter_lines():
+            if line:
+                data = json.loads(line.decode('utf-8'))
+                token = data.get("response", "")
+                yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                full_text_buffer += token
+
+    except Exception as e:
+        yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
+        return
+
+    answer_footnoted, citations_meta, answer_plain = sanitize_response(full_text_buffer.strip(), source_id_to_name, retrieved_parent_chunks)
+    latency_ms = int((time.time() - t_start) * 1000)
+
+    yield f"data: {json.dumps({'done': True, 'answer': answer_footnoted, 'plain_answer': answer_plain, 'citations': citations_meta, 'recommended_questions': [], 'latency_ms': latency_ms})}\n\n"
+

@@ -1,123 +1,221 @@
-# Kivo Workspace 🚀
+<div align="center">
 
-An **edge-first, privacy-respecting AI knowledge workspace** designed to run entirely locally on your host machine. Kivo Workspace allows you to upload multiple source formats (PDFs, Images, Audio files, YouTube videos, Websites, or custom notes), compile them into an isolated vector database, and explore your knowledge base through an interactive, source-grounded chat interface with robust citations and follow-up recommendations.
+# Kivo Workspace
 
----
+**A fully local, privacy-first AI knowledge workspace.**  
+Upload documents, videos, websites, and audio — then chat with your knowledge base using a grounded AI that cites every claim.
 
-## 🌟 Key Features
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)]()
+[![Backend](https://img.shields.io/badge/Backend-FastAPI%20%2B%20Python%203.12-green)]()
+[![Frontend](https://img.shields.io/badge/Frontend-Flutter%203.32-blue)]()
+[![LLM](https://img.shields.io/badge/LLM-Ollama%20(local)-orange)]()
 
-*   **Isolated Workspace Directory:** Organize topics or projects into standalone workspaces. Each workspace retains its own isolated documents, FAISS vector index, database mappings, and custom rules.
-*   **Flexible Source Ingestion:**
-    *   **PDF Documents:** Extracts clean, structured page-by-page text.
-    *   **Images (OCR):** Local OCR powered by Tesseract to extract text from screenshots, scanned documents, and images.
-    *   **Local Audio Files:** Offline transcription supporting `.mp3`, `.wav`, `.m4a`, `.flac`, and `.ogg` formats.
-    *   **YouTube Videos:** Subtitle-first parser that fetches transcriptions in seconds, with automatic fallback to local transcription models when subtitles are unavailable.
-    *   **Websites:** Full-page extraction using Playwright headless Chromium browser to execute JS and Mozilla's Readability algorithm to clean out navbars, sidebars, and ads.
-    *   **Text Pasting:** Hand-typed or copy-pasted custom notes saved directly as text sources.
-*   **Interactive Source Grid:** Notion-like visual interface to upload, track, and manage sources.
-*   **Sequential Extraction Pipeline:** Renders real-time, checkpoint-by-checkpoint visual progress updates on the frontend.
-*   **Privacy-First & Offline:** All chunking, embedding generation (using BGE-M3), FAISS index building, and LLM text generation (Ollama) run 100% locally. Raw uploaded files are securely purged after database compilation.
-*   **Dynamic Custom Instructions:** Customize LLM behavior, tone, formatting, and language (e.g. "Answer in Hindi", "Use bullet lists only") on a per-workspace level. Implemented with **Double Prompt Reinforcement** for small models.
-*   **Quick Actions & Follow-ups:** One-click capsule action chips (`Summarize`, `Create Notes`, `Generate Quiz`, `Key Concepts`) and context-aware follow-up suggestions dynamically generated after each AI message.
-*   **Interactive Citation Panel:** Footnotes linking each sentence back to the exact parent chunks of the source documents.
+</div>
 
 ---
 
-## 🛠️ Prerequisites & Setup
+## What is Kivo Workspace?
 
-### Global Dependencies
-*   **Python:** Version `3.11` or `3.12`
-*   **Flutter SDK:** Version `3.0` or higher
-*   **Ollama:** Install the [Ollama desktop client](https://ollama.com) and pull the default model:
-    ```bash
-    ollama pull qwen2.5:1.5b
-    ```
-*   **System Binaries:**
-    *   **FFmpeg:** Required for audio/video extraction (e.g. `brew install ffmpeg` on macOS).
-    *   **Tesseract OCR:** Required for image text extraction (e.g. `brew install tesseract` on macOS).
+Kivo Workspace is a **desktop application** that turns your documents, videos, and web pages into a private, searchable knowledge base — no cloud, no subscriptions, no data leaving your machine.
+
+You create isolated **Workspaces** (one per topic or project), add sources, let Kivo process and index them, and then have a conversation with an AI that answers strictly from your sources — with numbered citations linking back to the exact text it used.
+
+> **Everything runs on your device.** The embedding model, the vector database, and the language model (via Ollama) are all local. Nothing is ever sent to an external server.
 
 ---
 
-## 🏃 Getting Started
+## Key Features
 
-### 1. Backend Server Setup (FastAPI)
-
-1. Navigate to the backend folder:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a Python virtual environment:
-   * **macOS/Linux:**
-     ```bash
-     python3 -m venv venv
-     source venv/bin/activate
-     ```
-   * **Windows:**
-     ```bash
-     python3 -m venv venv
-     venv\Scripts\activate
-     ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Install Playwright browser binaries:
-   ```bash
-   playwright install chromium
-   ```
-5. Run the server:
-   ```bash
-   uvicorn main:app --reload --port 8000
-   ```
-   *The Kivo Workspace API will be running locally at `http://localhost:8000`.*
-
-### 2. Frontend Client Setup (Flutter)
-
-1. Navigate to the frontend folder:
-   ```bash
-   cd frontend
-   ```
-2. Retrieve packages:
-   ```bash
-   flutter pub get
-   ```
-3. Launch the desktop client:
-   * **macOS:** `flutter run -d macos`
-   * **Windows:** `flutter run -d windows`
-   * **Linux:** `flutter run -d linux`
+| Feature | Description |
+|---------|-------------|
+| 📁 **Isolated Workspaces** | Each workspace has its own documents, vector index, and custom AI instructions |
+| 📄 **PDF & Documents** | Clean, page-by-page text extraction using PyMuPDF |
+| 🖼️ **Images (OCR)** | Local OCR via Tesseract for screenshots and scanned documents |
+| 🎙️ **Audio Files** | Offline transcription via Faster-Whisper (`.mp3`, `.wav`, `.m4a`, `.flac`, `.ogg`) |
+| 📺 **YouTube Videos** | Subtitle-first fetch (instant), fallback to local transcription if no subtitles exist |
+| 🌐 **Websites** | Full-page extraction with Playwright + Mozilla Readability (handles JavaScript-heavy sites) |
+| 📝 **Text Notes** | Paste or type custom notes directly as sources |
+| 🔍 **Grounded Strict Mode** | AI answers using only your sources — every claim gets a citation like `[1]` |
+| 🧠 **Creative AI Mode** | Bypasses retrieval and answers from the model's own training knowledge |
+| 📌 **Citation Panel** | Click any citation to see the exact source chunk it came from |
+| ⚡ **Quick Actions** | One-tap chips: Summarize, Key Concepts, Generate Quiz, Create Notes |
+| 🎯 **Custom Instructions** | Per-workspace AI behavior: "Answer in Hindi", "Use bullet lists only", etc. |
+| 🔒 **100% Local & Private** | No telemetry, no analytics, no cloud APIs required |
 
 ---
 
-## 📂 Project Structure
+## Architecture Overview
 
 ```
-Kivo Workspace/
-├── frontend/       # Flutter cross-platform desktop application
-├── backend/        # FastAPI Python web server (RAG engine, pipelines, API routes)
-└── Docs/           # Project specifications, architecture reviews, and sprint tasks (Gitignored)
+┌─────────────────────────────────────────────────────────┐
+│                    Flutter Desktop App                  │
+│     (Riverpod state • Markdown rendering • SSE stream)  │
+└────────────────────────┬────────────────────────────────┘
+                         │ HTTP / Server-Sent Events
+                         │ localhost:8000
+┌────────────────────────▼────────────────────────────────┐
+│                   FastAPI Backend                        │
+│                                                          │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐  │
+│  │  Extraction  │  │  Embeddings  │  │  RAG Retriever │  │
+│  │  Pipelines   │  │  (ONNX GTE)  │  │  (FAISS index) │  │
+│  └─────────────┘  └──────────────┘  └───────┬────────┘  │
+│                                              │           │
+│  ┌───────────────────────────────────────────▼────────┐  │
+│  │              Ollama (local LLM)                    │  │
+│  │         qwen2.5:1.5b (default) or any model        │  │
+│  └────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Storage**: Each workspace stores its data in `~/Library/Application Support/KivoWorkspace/` (macOS) or the platform equivalent. Raw source files are purged after processing — only the extracted text, vector embeddings, and SQLite database are retained.
+
+---
+
+## Installation (End Users)
+
+> **Prerequisites:** [Ollama](https://ollama.com) must be installed and running, with at least one model pulled.
+
+```bash
+# Pull the default model first
+ollama pull qwen2.5:1.5b
+```
+
+### macOS / Linux — One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thedarkpcm/KivoWorkspace/main/install.sh | bash
+```
+
+### Windows — PowerShell install
+
+```powershell
+irm https://raw.githubusercontent.com/thedarkpcm/KivoWorkspace/main/install.ps1 | iex
+```
+
+Both scripts download the latest pre-built binary from [GitHub Releases](https://github.com/thedarkpcm/KivoWorkspace/releases), install it to the appropriate location, and create app shortcuts automatically.
+
+### Manual Download
+
+Download the latest release directly from the [Releases page](https://github.com/thedarkpcm/KivoWorkspace/releases):
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `KivoWorkspace-macOS-Silicon.zip` |
+| macOS (Intel) | `KivoWorkspace-macOS-Intel.zip` |
+| Windows x64 | `KivoWorkspace-Windows-x64.zip` |
+| Linux x64 | `KivoWorkspace-Linux-x64.tar.gz` |
+
+---
+
+## System Requirements
+
+| Component | Requirement |
+|-----------|-------------|
+| **OS** | macOS 12+, Windows 10+, Ubuntu 20.04+ |
+| **RAM** | 8 GB minimum (16 GB recommended for larger models) |
+| **Disk** | 5 GB free (model weights + workspace data) |
+| **Ollama** | Required — install from [ollama.com](https://ollama.com) |
+| **FFmpeg** | Required for audio/video sources |
+| **Tesseract** | Required for image OCR |
+
+**Install system dependencies (macOS):**
+```bash
+brew install ffmpeg tesseract
+```
+
+**Install system dependencies (Ubuntu/Debian):**
+```bash
+sudo apt-get install -y ffmpeg tesseract-ocr
+```
+
+**Install system dependencies (Windows):**  
+Install [FFmpeg](https://ffmpeg.org/download.html) and [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki) and add both to your system PATH.
+
+---
+
+## For Developers
+
+Want to run from source, modify the code, or contribute? See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full developer setup guide.
+
+**Quick summary:**
+```bash
+# Clone the repo
+git clone https://github.com/thedarkpcm/KivoWorkspace.git
+cd KivoWorkspace
+
+# macOS/Linux: one script sets up everything and launches the app
+./setup.sh
+
+# Windows: PowerShell equivalent
+.\setup.ps1
 ```
 
 ---
 
-## 🎯 Development Roadmap & Status
+## Project Structure
 
-| Sprint | Focus | Status |
-| :--- | :--- | :--- |
-| **Sprint 0** | Project Foundation | ✅ Complete |
-| **Sprint 1** | Workspace System CRUD | ✅ Complete |
-| **Sprint 2** | Source Upload UI | ✅ Complete |
-| **Sprint 3** | Processing Framework (Queues) | ✅ Complete |
-| **Sprint 4–7** | Extraction Pipelines (PDF, OCR, Audio, YouTube) | ✅ Complete |
-| **Wildcard** | Website & Copy-Text Ingestion | ✅ Complete |
-| **Sprint 8–9** | Embeddings & FAISS Vector Database | ✅ Complete |
-| **Sprint 10–11** | Retrieval Engine & Chat Interface | ✅ Complete |
-| **Sprint 12** | Interactive Citation System | ✅ Complete |
-| **Sprint 13** | Workspace Custom System Instructions | ✅ Complete |
-| **Sprint 14** | Welcome Cards & Quick Actions Row | ✅ Complete |
-| **Sprint 15** | Suggested Follow-Up Questions | ✅ Complete |
-| **Sprint 16** | **Polish & Stabilization** | 🔲 **Up Next** |
+```
+KivoWorkspace/
+├── frontend/                   # Flutter desktop app
+│   ├── lib/
+│   │   ├── features/           # Feature modules (workspace, chat, sources, settings)
+│   │   ├── core/               # Theme, routing, shared widgets
+│   │   └── main.dart
+│   └── macos/ windows/ linux/  # Platform-specific build configs
+│
+├── backend/                    # FastAPI Python server
+│   ├── app/
+│   │   ├── api/routes/         # REST endpoints (workspaces, sources, chat, processing)
+│   │   ├── core/               # RAG retriever, config, database
+│   │   └── core/processors/    # Extraction pipelines (PDF, OCR, YouTube, audio, web)
+│   ├── tests/                  # pytest test suite
+│   ├── requirements.txt        # Production dependencies
+│   ├── requirements-dev.txt    # Development/test dependencies
+│   └── main.py                 # FastAPI app entry point
+│
+├── .github/workflows/          # CI/CD — auto-builds and publishes releases on git tag
+├── install.sh / install.ps1    # End-user one-line installers
+├── setup.sh / setup.ps1        # Developer source setup & launcher scripts
+└── Docs/                       # Internal architecture docs (gitignored)
+```
 
 ---
 
-## 🔒 Security & Optimization Note (macOS)
-The local RAG pipeline has been updated with safety import ordering to prevent runtime conflicts between `faiss` and `torch` (OpenMP/MKL runtime collision) on macOS CPU. All code compiles and analyses cleanly with static checks.
+## Recommended Models
+
+Kivo works with any model available in Ollama. Tested configurations:
+
+| Model | Size | Use Case |
+|-------|------|----------|
+| `qwen2.5:1.5b` | ~1 GB | Default — fast, low RAM, good for constrained hardware |
+| `qwen2.5:7b` | ~5 GB | Better reasoning, recommended if you have 16 GB RAM |
+| `llama3.2:3b` | ~2 GB | Alternative lightweight option |
+| `mistral:7b` | ~5 GB | Strong instruction following |
+
+Change the active model from the **Settings** screen inside the app.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first for development setup, code style, and PR guidelines.
+
+**Quick steps:**
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make your changes and run tests: `cd backend && ./venv/bin/pytest`
+4. Push and open a Pull Request
+
+Please open a GitHub Issue before starting work on a major feature so we can align on the approach.
+
+---
+
+## License
+
+Copyright © 2026 Kivo Workspace Contributors.
+
+Licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for the full text.
+
+You are free to use, modify, and distribute this software under the terms of the Apache 2.0 license. Attribution is required when redistributing.

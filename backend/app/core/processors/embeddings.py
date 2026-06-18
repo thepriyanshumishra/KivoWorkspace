@@ -19,36 +19,137 @@ logger = logging.getLogger("kivo.processors.embeddings")
 # Singleton instance of the model to avoid loading 610MB model weights repeatedly
 _model_instance = None
 
+class ONNXEmbeddingModel:
+    def __init__(self, model_path: str, tokenizer_name: str = "Alibaba-NLP/gte-multilingual-base"):
+        logger.info(f"Initializing ONNX Inference Session from: {model_path}")
+        from transformers import AutoTokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+        
+        # Select best execution provider
+        import onnxruntime as ort
+        available_providers = ort.get_available_providers()
+        # CoreMLExecutionProvider has compatibility issues with dynamic INT8 quantized NLP models, so we exclude it.
+        preferred_providers = ["CUDAExecutionProvider", "DirectMLExecutionProvider", "CPUExecutionProvider"]
+        providers = [p for p in preferred_providers if p in available_providers]
+        
+        logger.info(f"Available ONNX Execution Providers: {available_providers}")
+        logger.info(f"Selected ONNX Execution Providers: {providers}")
+        
+        self.session = ort.InferenceSession(model_path, providers=providers)
+
+    def encode(
+        self,
+        sentences: List[str] | str,
+        batch_size: int = 16,
+        show_progress_bar: bool = False,
+        normalize_embeddings: bool = True
+    ) -> np.ndarray:
+        if isinstance(sentences, str):
+            sentences = [sentences]
+            
+        all_embeddings = []
+        for i in range(0, len(sentences), batch_size):
+            batch = sentences[i : i + batch_size]
+            
+            # Tokenize batch
+            inputs = self.tokenizer(
+                batch,
+                padding=True,
+                truncation=True,
+                max_length=512,
+                return_tensors="np"
+            )
+            
+            # Prepare inputs for ONNX session
+            ort_inputs = {
+                "input_ids": inputs["input_ids"],
+                "attention_mask": inputs["attention_mask"]
+            }
+            
+            # Run inference
+            ort_outputs = self.session.run(None, ort_inputs)
+            last_hidden_state = ort_outputs[0]  # shape: [batch, seq_len, hidden_dim]
+            
+            # CLS pooling: take embedding of the first token (index 0)
+            cls_embeddings = last_hidden_state[:, 0, :]
+            
+            # Normalize embeddings
+            if normalize_embeddings:
+                norms = np.linalg.norm(cls_embeddings, axis=1, keepdims=True)
+                # Avoid division by zero
+                cls_embeddings = np.where(norms > 0, cls_embeddings / norms, cls_embeddings)
+                
+            all_embeddings.append(cls_embeddings)
+            
+        return np.vstack(all_embeddings)
+
 def get_embedding_model():
     """
-    Lazy-loads and caches the GTE-Multilingual-Base model in memory.
-    Ensures hardware acceleration (MPS/CUDA) is utilized.
+    Lazy-loads and caches the quantized GTE model.
+    If the quantized ONNX file is not found, automatically compiles it on CPU.
     """
     global _model_instance
     if _model_instance is not None:
         return _model_instance
 
-    from sentence_transformers import SentenceTransformer
-    import torch
-    import platform
+    models_dir = settings.storage_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    quant_onnx_path = models_dir / "gte_multilingual_base_quantized.onnx"
 
-    # Determine best device
-    # Note: PyTorch MPS backend can crash/segfault with exit code 139 on certain custom transformer operations
-    # in gte-multilingual-base. We force CPU on macOS to ensure 100% stability.
-    if torch.cuda.is_available():
-        device = "cuda"
-    else:
-        device = "cpu"
+    if not quant_onnx_path.exists():
+        logger.info("Quantized GTE ONNX model not found. Starting automatic conversion...")
+        try:
+            import torch
+            from sentence_transformers import SentenceTransformer
+            from onnxruntime.quantization import quantize_dynamic, QuantType
+            
+            temp_onnx_path = models_dir / "gte_multilingual_base_temp.onnx"
+            
+            logger.info("Loading PyTorch model on CPU for tracing...")
+            model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code=True, device="cpu")
+            auto_model = model[0].auto_model
+            tokenizer = model[0].tokenizer
+            auto_model.eval()
+            
+            # Trace with dummy input
+            text = "This is a test sentence for ONNX export."
+            inputs = tokenizer(text, return_tensors="pt")
+            
+            logger.info("Exporting to FP32 ONNX graph...")
+            with torch.no_grad():
+                torch.onnx.export(
+                    auto_model,
+                    (inputs["input_ids"].cpu(), inputs["attention_mask"].cpu()),
+                    str(temp_onnx_path),
+                    input_names=["input_ids", "attention_mask"],
+                    output_names=["last_hidden_state"],
+                    dynamic_axes={
+                        "input_ids": {0: "batch_size", 1: "sequence_length"},
+                        "attention_mask": {0: "batch_size", 1: "sequence_length"},
+                        "last_hidden_state": {0: "batch_size", 1: "sequence_length"}
+                    },
+                    opset_version=14,
+                    do_constant_folding=True
+                )
+                
+            logger.info("Quantizing ONNX model to INT8...")
+            quantize_dynamic(
+                model_input=str(temp_onnx_path),
+                model_output=str(quant_onnx_path),
+                weight_type=QuantType.QInt8
+            )
+            
+            # Clean up the large temp FP32 file
+            if temp_onnx_path.exists():
+                temp_onnx_path.unlink()
+                logger.info("Cleaned up temporary FP32 ONNX model file.")
+                
+            logger.info("GTE ONNX quantization completed successfully.")
+        except Exception as export_err:
+            logger.error(f"Failed to auto-export GTE model to ONNX: {export_err}")
+            raise RuntimeError(f"GTE model ONNX export failed: {export_err}")
 
-    logger.info(f"Loading Alibaba-NLP/gte-multilingual-base model onto device: {device}")
-    
-    # Load model (gte-multilingual-base requires trust_remote_code=True for custom architectures)
-    _model_instance = SentenceTransformer(
-        "Alibaba-NLP/gte-multilingual-base",
-        trust_remote_code=True,
-        device=device
-    )
-    logger.info("Embedding model loaded successfully.")
+    _model_instance = ONNXEmbeddingModel(str(quant_onnx_path))
     return _model_instance
 
 

@@ -1,0 +1,145 @@
+name: Kivo Workspace Auto-Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers workflow only when version tags are pushed (e.g. v1.0.0)
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build Release Package for ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-latest
+            artifact_name: KivoWorkspace-Windows-x64.zip
+          - platform: linux-x64
+            os: ubuntu-latest
+            artifact_name: KivoWorkspace-Linux-x64.tar.gz
+          - platform: macos-x64
+            os: macos-13
+            artifact_name: KivoWorkspace-macOS-Intel.zip
+          - platform: macos-arm64
+            os: macos-14
+            artifact_name: KivoWorkspace-macOS-Silicon.zip
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # --- 1. Setup SDKs ---
+      - name: Setup Java (required for Flutter Android/Build tools)
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.32.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      # --- 2. Build Python Backend ---
+      - name: Install PyInstaller & Backend Dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Compile Backend with PyInstaller
+        run: |
+          cd backend
+          pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+
+      # --- 3. Build Flutter Frontend ---
+      - name: Fetch Dart Packages
+        run: |
+          cd frontend
+          flutter pub get
+
+      # macOS Build & Bundling
+      - name: Build macOS App
+        if: startsWith(matrix.platform, 'macos')
+        run: |
+          cd frontend
+          flutter build macos --release
+          
+          # Create resources bin folder inside the app bundle
+          mkdir -p build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin
+          
+          # Copy compiled kivo_backend folder into the app bundle resources
+          cp -R ../backend/dist/kivo_backend build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin/
+          
+      # Windows Build & Bundling
+      - name: Build Windows App
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          cd frontend
+          flutter build windows --release
+          
+          # Create bin folder alongside the windows executable
+          New-Item -ItemType Directory -Path build/windows/runner/Release/bin -Force
+          
+          # Copy compiled backend folder into bin
+          Copy-Item -Path ../backend/dist/kivo_backend -Destination build/windows/runner/Release/bin/ -Recurse -Force
+
+      # Linux Build & Bundling
+      - name: Build Linux App
+        if: matrix.platform == 'linux-x64'
+        run: |
+          # Install Linux desktop build requirements
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+          
+          cd frontend
+          flutter build linux --release
+          
+          # Create bin folder alongside the linux binary bundle
+          mkdir -p build/linux/x64/release/bundle/bin
+          
+          # Copy compiled backend folder into bin
+          cp -R ../backend/dist/kivo_backend build/linux/x64/release/bundle/bin/
+
+      # --- 4. Package Artifacts ---
+      - name: Package macOS App Bundle
+        if: startsWith(matrix.platform, 'macos')
+        run: |
+          cd frontend/build/macos/Build/Products/Release
+          zip -r ../../../../../../${{ matrix.artifact_name }} kivo_workspace.app
+
+      - name: Package Windows Executable Folder
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
+        run: |
+          cd frontend/build/windows/runner/Release
+          Compress-Archive -Path * -DestinationPath ../../../../../${{ matrix.artifact_name }} -Force
+
+      - name: Package Linux Binary Bundle
+        if: matrix.platform == 'linux-x64'
+        run: |
+          cd frontend/build/linux/x64/release/bundle
+          tar -czf ../../../../../../${{ matrix.artifact_name }} *
+
+      # --- 5. Upload to GitHub Releases ---
+      - name: Publish Artifacts to GitHub Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ matrix.artifact_name }}
+          draft: true # Creates a draft release so you can review it before making it public
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

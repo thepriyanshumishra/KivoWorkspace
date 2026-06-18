@@ -8,7 +8,7 @@
 PRODUCT_NAME = kivo_workspace
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.kivo.kivoWorkspace
+PRODUCT_BUNDLE_IDENTIFIER = com.kivo.workspace
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.kivo. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Kivo Workspace Contributors. Licensed under Apache 2.0.

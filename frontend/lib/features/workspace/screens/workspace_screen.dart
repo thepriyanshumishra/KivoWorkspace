@@ -12,6 +12,11 @@ import '../../source_upload/providers/source_providers.dart';
 import '../../chat/models/chat_message.dart';
 import '../../chat/models/citation.dart';
 import '../../chat/providers/chat_providers.dart';
+import '../../tutorial/providers/tutorial_provider.dart';
+import '../../tutorial/screens/tutorial_overlay.dart';
+import '../../onboarding/services/onboarding_prefs.dart';
+import '../../onboarding/models/onboarding_state.dart';
+import '../../../core/theme/theme_provider.dart';
 
 class WorkspaceScreen extends ConsumerStatefulWidget {
   final String workspaceId;
@@ -29,15 +34,36 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
   bool _isSourcesPanelCollapsed = false;
   Citation? _selectedCitation;
   bool _isInputFocused = false;
+  bool _isStrictSourceMode = true;
+  List<String> _downloadedModels = [];
 
   @override
   void initState() {
     super.initState();
+    _loadModels();
     _focusNode.addListener(() {
       setState(() {
         _isInputFocused = _focusNode.hasFocus;
       });
     });
+  }
+
+  Future<void> _loadModels() async {
+    final list = await OnboardingPrefs.getDownloadedModels();
+    if (mounted) {
+      setState(() {
+        _downloadedModels = list;
+      });
+    }
+  }
+
+  String _cleanModelName(String modelId) {
+    try {
+      final match = curatedModelRegistry.firstWhere((m) => m.id == modelId);
+      return match.name.split(' (').first;
+    } catch (_) {
+      return modelId;
+    }
   }
 
   @override
@@ -65,7 +91,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     if (text.isEmpty) return;
 
     _messageController.clear();
-    ref.read(chatProvider(widget.workspaceId).notifier).sendMessage(text);
+    ref.read(chatProvider(widget.workspaceId).notifier).sendMessage(text, isStrict: _isStrictSourceMode);
     _focusNode.requestFocus();
     _scrollToBottom();
   }
@@ -584,7 +610,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                 ),
                 padding: const EdgeInsets.only(left: 12),
                 child: Text(
-                  _getMockRetrievedSegment(citation),
+                  citation.snippet ?? _getMockRetrievedSegment(citation),
                   style: TextStyle(
                     fontSize: 13,
                     color: colors.textPrimary,
@@ -651,6 +677,47 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     );
   }
 
+  Widget _buildModeToggleOption({
+    required String label,
+    required String tooltip,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    final colors = context.colors;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: isActive
+            ? colors.primary.withValues(alpha: 0.1)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          hoverColor: colors.textPrimary.withValues(alpha: 0.05),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: isActive ? colors.primary.withValues(alpha: 0.4) : colors.border,
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                color: isActive ? colors.primary : colors.textSecondary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyChatState(BuildContext context) {
     final colors = context.colors;
     return Center(
@@ -704,9 +771,6 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     final isUser = message.isUser;
     final bubbleBg = isUser ? colors.sidebarBackground : colors.surface;
 
-    final chatState = ref.read(chatProvider(widget.workspaceId));
-    final isLastMessage = chatState.messages.indexOf(message) == chatState.messages.length - 1;
-    final showRecommended = !isUser && isLastMessage && message.recommendedQuestions.isNotEmpty;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -793,41 +857,103 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                         separatorBuilder: (context, index) => const SizedBox(width: 6),
                         itemBuilder: (context, index) {
                           final cit = message.citations[index];
-                          return InkWell(
-                            onTap: () {
-                              setState(() {
-                                _selectedCitation = cit;
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(4),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF252525) : const Color(0xFFFBFBFA),
-                                border: Border.all(color: colors.border),
-                                borderRadius: BorderRadius.circular(4),
+                          return Tooltip(
+                            richMessage: WidgetSpan(
+                              child: Container(
+                                constraints: const BoxConstraints(maxWidth: 350),
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.description_outlined, color: colors.primary, size: 14),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            cit.sourceName,
+                                            style: TextStyle(
+                                              color: colors.textPrimary,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (cit.snippet != null && cit.snippet!.isNotEmpty) ...[
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        cit.snippet!,
+                                        style: TextStyle(
+                                          color: colors.textSecondary,
+                                          fontSize: 11,
+                                          height: 1.4,
+                                        ),
+                                        maxLines: 6,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.description_outlined, size: 12, color: colors.textSecondary),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    '[${cit.index}]',
-                                    style: TextStyle(
-                                      color: colors.primary,
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.bold,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? const Color(0xFF1E1E1E).withValues(alpha: 0.95)
+                                  : Colors.white.withValues(alpha: 0.95),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: colors.border),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.1),
+                                  blurRadius: 10,
+                                  spreadRadius: 2,
+                                ),
+                              ],
+                            ),
+                            preferBelow: false,
+                            verticalOffset: 20,
+                            waitDuration: const Duration(milliseconds: 200),
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _selectedCitation = cit;
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(4),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF252525) : const Color(0xFFFBFBFA),
+                                  border: Border.all(color: colors.border),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.description_outlined, size: 12, color: colors.textSecondary),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '[${cit.index}]',
+                                      style: TextStyle(
+                                        color: colors.primary,
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    cit.sourceName,
-                                    style: TextStyle(
-                                      color: colors.textSecondary,
-                                      fontSize: 10.5,
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      cit.sourceName,
+                                      style: TextStyle(
+                                        color: colors.textSecondary,
+                                        fontSize: 10.5,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           );
@@ -837,27 +963,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                     const SizedBox(height: 8),
                   ],
                 ],
-                if (showRecommended) ...[
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: message.recommendedQuestions.map((q) {
-                      return OutlinedButton(
-                        onPressed: () => _triggerQuickAction(q),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: colors.border),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        ),
-                        child: Text(
-                          q,
-                          style: TextStyle(color: colors.textSecondary, fontSize: 12),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
+
               ],
             ),
           ),
@@ -911,6 +1017,73 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     );
   }
 
+  Widget _buildDoneOverlay(BuildContext context, WidgetRef ref) {
+    final colors = context.colors;
+    return Container(
+      color: Colors.black.withValues(alpha: 0.6),
+      alignment: Alignment.center,
+      child: Card(
+        color: colors.sidebarBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: colors.border),
+        ),
+        elevation: 12,
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_outline_rounded, size: 36, color: Colors.green),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'You\'re All Set! 🎉',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                  color: colors.textPrimary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'You have learned the basics of Kivo Workspace. Now you can ingest your local files and chat with them in complete privacy.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: colors.textSecondary,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => ref.read(tutorialProvider.notifier).finishTutorial(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const Text('Finish Tour', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
@@ -918,6 +1091,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
     final sourcesState = ref.watch(sourcesProvider(widget.workspaceId));
     final chatState = ref.watch(chatProvider(widget.workspaceId));
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tutorialState = ref.watch(tutorialProvider);
 
     final String workspaceName = activeWorkspaceState.maybeWhen(
       data: (w) => w.name,
@@ -931,7 +1105,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
 
     final hasReadySources = sources.any((s) => s.status == src_model.SourceStatus.ready);
 
-    return Scaffold(
+    Widget body = Scaffold(
       body: Row(
         children: [
           // Sidebar sources panel
@@ -1023,6 +1197,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                       const Spacer(),
                       // Settings and Download icons
                       IconButton(
+                        key: TutorialKeys.settingsBtn,
                         icon: const Icon(Icons.settings_outlined, size: 18),
                         onPressed: () {
                           context.push(AppRoutes.workspaceSettings.replaceAll(':workspaceId', widget.workspaceId));
@@ -1080,6 +1255,25 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildModeToggleOption(
+                              label: 'Strict Source Mode 🔒',
+                              tooltip: 'Answers strictly from documents. Refuses if not found.',
+                              isActive: _isStrictSourceMode,
+                              onTap: () => setState(() => _isStrictSourceMode = true),
+                            ),
+                            const SizedBox(width: 8),
+                            _buildModeToggleOption(
+                              label: 'Creative AI Mode 🌐',
+                              tooltip: 'Sources are prioritized, but general AI knowledge is used to elaborate.',
+                              isActive: !_isStrictSourceMode,
+                              onTap: () => setState(() => _isStrictSourceMode = false),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
                         Container(
                           decoration: BoxDecoration(
                             color: isDark ? const Color(0xFF202020) : const Color(0xFFFBFBFA),
@@ -1100,6 +1294,7 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                               ),
                               Expanded(
                                 child: TextField(
+                                  key: TutorialKeys.chatInput,
                                   controller: _messageController,
                                   focusNode: _focusNode,
                                   enabled: hasReadySources,
@@ -1114,6 +1309,47 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                                     focusedBorder: InputBorder.none,
                                     filled: false,
                                     contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Theme(
+                                data: Theme.of(context).copyWith(
+                                  canvasColor: colors.sidebarBackground,
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String>(
+                                    value: _downloadedModels.contains(ref.watch(activeModelProvider))
+                                        ? ref.watch(activeModelProvider)
+                                        : (_downloadedModels.isNotEmpty ? _downloadedModels.first : null),
+                                    icon: Icon(Icons.arrow_drop_down_rounded, color: colors.textSecondary),
+                                    style: TextStyle(color: colors.textPrimary, fontSize: 12.5, fontWeight: FontWeight.w600),
+                                    onChanged: (newValue) {
+                                      if (newValue == 'add_model') {
+                                        context.push('/model-downloader').then((_) => _loadModels());
+                                      } else if (newValue != null) {
+                                        ref.read(activeModelProvider.notifier).state = newValue;
+                                        OnboardingPrefs.write({'activeModel': newValue});
+                                      }
+                                    },
+                                    items: [
+                                      ..._downloadedModels.map((modelId) {
+                                        return DropdownMenuItem<String>(
+                                          value: modelId,
+                                          child: Text(_cleanModelName(modelId)),
+                                        );
+                                      }),
+                                      const DropdownMenuItem<String>(
+                                        value: 'add_model',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.add, size: 14, color: Colors.blue),
+                                            SizedBox(width: 4),
+                                            Text('Add Model', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -1158,6 +1394,41 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         ],
       ),
     );
+
+    if (tutorialState.isActive) {
+      if (tutorialState.currentStep == TutorialStep.chat) {
+        body = TutorialOverlay(
+          targetKey: TutorialKeys.chatInput,
+          title: 'Chat with your Workspace',
+          description: 'Ask questions, search details, or summarize documents. Every response includes direct citations back to the source files.',
+          onNext: () {
+            ref.read(tutorialProvider.notifier).nextStep();
+          },
+          onSkip: () => ref.read(tutorialProvider.notifier).skipTutorial(),
+          child: body,
+        );
+      } else if (tutorialState.currentStep == TutorialStep.settings) {
+        body = TutorialOverlay(
+          targetKey: TutorialKeys.settingsBtn,
+          title: 'Workspace Settings',
+          description: 'Tweak retrieval options, configure your local LLM model temperature, or change themes and typography here.',
+          onNext: () {
+            ref.read(tutorialProvider.notifier).nextStep();
+          },
+          onSkip: () => ref.read(tutorialProvider.notifier).skipTutorial(),
+          child: body,
+        );
+      } else if (tutorialState.currentStep == TutorialStep.done) {
+        body = Stack(
+          children: [
+            body,
+            _buildDoneOverlay(context, ref),
+          ],
+        );
+      }
+    }
+
+    return body;
   }
 }
 

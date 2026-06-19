@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-latest
             artifact_name: KivoWorkspace-Linux-x64.tar.gz
           - platform: macos-x64
-            os: [self-hosted, macos, x64]
+            os: macos-13
             artifact_name: KivoWorkspace-macOS-Intel.zip
           - platform: macos-arm64
             os: macos-14
@@ -52,19 +52,11 @@ jobs:
           flutter config --enable-macos-desktop
           flutter config --enable-linux-desktop
 
-      # Setup Python — skipped for self-hosted macOS x64 (uses system Python 3 at /usr/local/bin/python3)
+      # Setup Python (sets up python-3.12 for compiling the backend executable)
       - name: Setup Python
-        if: matrix.platform != 'macos-x64'
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-
-      # Verify system Python is available on self-hosted macOS Intel runner
-      - name: Verify System Python (macOS self-hosted only)
-        if: matrix.platform == 'macos-x64'
-        run: |
-          python3 --version
-          pip3 --version
 
       # --- 2. Build Python Backend ---
 

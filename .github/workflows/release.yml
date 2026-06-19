@@ -11,11 +11,51 @@ permissions:
 jobs:
 
   # ============================================================
+  # JOB 0 · Build Flutter Web Assets (Compiled Once)
+  # ============================================================
+  build-web:
+    name: Flutter Web Assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.x'
+
+      - name: Flutter pub get
+        run: |
+          cd frontend
+          flutter pub get
+
+      - name: Build Flutter Web App
+        run: |
+          cd frontend
+          flutter build web --release
+
+      - name: Upload Web Assets Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: frontend/build/web/
+
+  # ============================================================
   # JOB 1 · Windows → KivoWorkspace-Windows.exe
   # ============================================================
   build-windows:
     name: Windows (.exe)
     runs-on: windows-2022
+    needs: [build-web]
 
     steps:
       - name: Checkout
@@ -74,6 +114,19 @@ jobs:
                     -Destination "frontend\build\windows\x64\runner\Release\bin\" `
                     -Recurse -Force
 
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Copy Web assets into backend folder
+        shell: pwsh
+        run: |
+          Copy-Item -Path "web" `
+                    -Destination "frontend\build\windows\x64\runner\Release\bin\kivo_backend\" `
+                    -Recurse -Force
+
       - name: Build installer with Inno Setup
         shell: pwsh
         run: |
@@ -101,6 +154,7 @@ jobs:
   build-linux:
     name: Linux (.deb/ .rpm/ .appimage)
     runs-on: ubuntu-latest
+    needs: [build-web]
 
     steps:
       - name: Checkout
@@ -160,6 +214,16 @@ jobs:
           mkdir -p frontend/build/linux/x64/release/bundle/bin
           cp -R backend/dist/kivo_backend frontend/build/linux/x64/release/bundle/bin/
 
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Copy Web assets into backend folder
+        run: |
+          cp -R web frontend/build/linux/x64/release/bundle/bin/kivo_backend/
+
       - name: Build .deb package
         run: |
           BUNDLE="frontend/build/linux/x64/release/bundle"
@@ -213,6 +277,7 @@ jobs:
   build-macos-silicon:
     name: macOS Silicon
     runs-on: macos-14
+    needs: [build-web]
 
     steps:
       - name: Checkout
@@ -251,6 +316,12 @@ jobs:
           cd backend
           .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
 
+      - name: Upload Silicon Backend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kivo_backend_silicon
+          path: backend/dist/kivo_backend/
+
       - name: Flutter pub get
         run: |
           cd frontend
@@ -261,11 +332,27 @@ jobs:
           cd frontend
           flutter build macos --release
 
+      - name: Thin Flutter executable to arm64
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          lipo -thin arm64 "$APP/Contents/MacOS/Kivo Workspace" -output "$APP/Contents/MacOS/Kivo Workspace"
+
       - name: Embed backend into app bundle
         run: |
           APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
           mkdir -p "$APP/Contents/Resources/bin"
           cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Copy Web assets into backend folder
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend/"
 
       - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
         run: |
@@ -301,7 +388,8 @@ jobs:
   # ============================================================
   build-macos-intel:
     name: macOS Intel
-    runs-on: [self-hosted, macos, x64]
+    runs-on: macos-13
+    needs: [build-web]
 
     steps:
       - name: Checkout
@@ -322,6 +410,11 @@ jobs:
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Verify System Python
         run: |
           python3 --version
@@ -340,6 +433,12 @@ jobs:
           cd backend
           .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
 
+      - name: Upload Intel Backend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kivo_backend_intel
+          path: backend/dist/kivo_backend/
+
       - name: Flutter pub get
         run: |
           cd frontend
@@ -350,11 +449,27 @@ jobs:
           cd frontend
           flutter build macos --release
 
+      - name: Thin Flutter executable to x86_64
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          lipo -thin x86_64 "$APP/Contents/MacOS/Kivo Workspace" -output "$APP/Contents/MacOS/Kivo Workspace"
+
       - name: Embed backend into app bundle
         run: |
           APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
           mkdir -p "$APP/Contents/Resources/bin"
           cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Copy Web assets into backend folder
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend/"
 
       - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
         run: |
@@ -382,5 +497,98 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: KivoWorkspace-macOS-Intel.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # JOB 5 · macOS Universal → KivoWorkspace-macOS-Universal.dmg
+  # ============================================================
+  build-macos-universal:
+    name: macOS Universal
+    runs-on: macos-14
+    needs: [build-web, build-macos-silicon, build-macos-intel]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.x'
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Flutter pub get
+        run: |
+          cd frontend
+          flutter pub get
+
+      - name: Build Flutter macOS app
+        run: |
+          cd frontend
+          flutter build macos --release
+
+      - name: Download Silicon Backend Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_backend_silicon
+          path: silicon_backend
+
+      - name: Download Intel Backend Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_backend_intel
+          path: intel_backend
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Embed both backends into app bundle
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          mkdir -p "$APP/Contents/Resources/bin/kivo_backend_silicon"
+          mkdir -p "$APP/Contents/Resources/bin/kivo_backend_intel"
+          cp -R silicon_backend/. "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
+          cp -R intel_backend/. "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
+          # Copy web assets into both backend directories
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
+
+      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          codesign --force --deep --sign - "$APP"
+
+      - name: Create Universal DMG
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          STAGING="dmg_staging_universal"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -volname "Kivo Workspace" \
+            -format UDZO \
+            KivoWorkspace-macOS-Universal.dmg
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-macOS-Universal.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

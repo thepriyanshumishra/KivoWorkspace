@@ -312,9 +312,36 @@ class OnboardingService {
       // 1. Check bundled folder first (production build)
       final bundleDir = _getBundleBinDir();
       if (bundleDir != null) {
-        final f = File(path.join(bundleDir.path, backendExeName));
-        if (f.existsSync()) {
-          backendFile = f;
+        // Try architecture-specific subdirectory first (for Universal builds)
+        String subfolder = '';
+        if (Platform.isMacOS) {
+          final specs = await checkSystemSpecs();
+          if (specs['arch'] == 'arm64') {
+            subfolder = 'kivo_backend_silicon';
+          } else {
+            subfolder = 'kivo_backend_intel';
+          }
+        }
+
+        if (subfolder.isNotEmpty) {
+          final archFile = File(path.join(bundleDir.path, subfolder, 'kivo_backend', backendExeName));
+          if (archFile.existsSync()) {
+            backendFile = archFile;
+          }
+        }
+
+        // Fallback to direct executable/folder in bin/
+        if (backendFile == null) {
+          final directFile = File(path.join(bundleDir.path, backendExeName));
+          if (directFile.existsSync() && !Directory(directFile.path).existsSync()) {
+            backendFile = directFile;
+          } else {
+            // Check if it is a directory containing the executable (PyInstaller onedir mode)
+            final onedirFile = File(path.join(bundleDir.path, 'kivo_backend', backendExeName));
+            if (onedirFile.existsSync()) {
+              backendFile = onedirFile;
+            }
+          }
         }
       }
 

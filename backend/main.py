@@ -359,5 +359,51 @@ app.include_router(chat_router, prefix="/workspaces/{workspace_id}/chat", tags=[
 app.include_router(universal_chat_router, prefix="/universal-chat", tags=["Universal Chat"])
 
 
+# --- Static Files / SPA Serving ---
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+base_path = Path(__file__).parent
+web_dir = base_path / "frontend" / "build" / "web"
+if not web_dir.exists():
+    web_dir = base_path / "web"
+
+if getattr(sys, "frozen", False):
+    exe_dir = Path(sys.executable).parent
+    if (exe_dir / "web").exists():
+        web_dir = exe_dir / "web"
+
+if web_dir.exists():
+    logger.info(f"Serving Flutter frontend from static directory: {web_dir}")
+    
+    # Mount the assets directory separately to ensure files are served directly
+    assets_dir = web_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{catchall:path}")
+    async def serve_spa(catchall: str):
+        # Prevent accessing API routes through catchall
+        if catchall.startswith(("workspaces", "universal-chat", "health", "system")):
+            return {"error": "Not Found"}
+            
+        # Resolve real path to prevent directory traversal attacks
+        try:
+            resolved_path = (web_dir / catchall).resolve()
+            if resolved_path.is_file() and resolved_path.is_relative_to(web_dir.resolve()):
+                return FileResponse(resolved_path)
+        except Exception:
+            pass
+            
+        # Fallback to index.html for client-side routing (SPA)
+        index_path = web_dir / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+            
+        return {"error": "Frontend assets not found"}
+else:
+    logger.warning(f"Frontend static directory NOT found at {web_dir}. Single-port web serving is disabled.")
+
+
 
 

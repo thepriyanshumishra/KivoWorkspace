@@ -272,10 +272,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
-  # JOB 3 · macOS (Intel, Silicon & Universal)
+  # JOB 3 · macOS Silicon → KivoWorkspace-macOS-Silicon.dmg
   # ============================================================
-  build-macos:
-    name: macOS (Intel, Silicon & Universal)
+  build-macos-silicon:
+    name: macOS Silicon
     runs-on: macos-14
     needs: [build-web]
 
@@ -298,53 +298,50 @@ jobs:
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
-      # --- 1. BUILD INTEL BACKEND (x86_64) ---
-      - name: Setup Python (x86_64)
+      - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          architecture: 'x64'
 
-      - name: Install dependencies & PyInstaller (Intel)
+      - name: Install backend dependencies & PyInstaller (arm64)
         run: |
           cd backend
-          python3 -m venv .venv_intel
-          .venv_intel/bin/pip install --upgrade pip
-          .venv_intel/bin/pip install -r requirements_ci.txt
-          .venv_intel/bin/pip install pyinstaller
-          .venv_intel/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
-          mkdir -p dist_intel
-          cp -R dist/kivo_backend dist_intel/
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements_ci.txt
+          .venv/bin/pip install pyinstaller
 
-      # --- 2. BUILD SILICON BACKEND (arm64) ---
-      - name: Setup Python (arm64)
-        uses: actions/setup-python@v5
+      - name: Build backend with PyInstaller (arm64)
+        run: |
+          cd backend
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+
+      - name: Upload Silicon Backend Artifact
+        uses: actions/upload-artifact@v4
         with:
-          python-version: '3.12'
-          architecture: 'arm64'
+          name: kivo_backend_silicon
+          path: backend/dist/kivo_backend/
 
-      - name: Install dependencies & PyInstaller (Silicon)
-        run: |
-          cd backend
-          rm -rf build dist
-          python3 -m venv .venv_silicon
-          .venv_silicon/bin/pip install --upgrade pip
-          .venv_silicon/bin/pip install -r requirements_ci.txt
-          .venv_silicon/bin/pip install pyinstaller
-          .venv_silicon/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
-          mkdir -p dist_silicon
-          cp -R dist/kivo_backend dist_silicon/
-
-      # --- 3. BUILD FLUTTER APP & EMBED BACKENDS ---
       - name: Flutter pub get
         run: |
           cd frontend
           flutter pub get
 
-      - name: Build Flutter macOS app (Creates Universal App by default)
+      - name: Build Flutter macOS app
         run: |
           cd frontend
           flutter build macos --release
+
+      - name: Thin Flutter executable to arm64
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          lipo -thin arm64 "$APP/Contents/MacOS/Kivo Workspace" -output "$APP/Contents/MacOS/Kivo Workspace"
+
+      - name: Embed backend into app bundle
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          mkdir -p "$APP/Contents/Resources/bin"
+          cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
 
       - name: Download Web Assets Artifact
         uses: actions/download-artifact@v4
@@ -352,92 +349,240 @@ jobs:
           name: kivo_web_assets
           path: web
 
-      # --- 4. PRODUCE SILICON ONLY DMG ---
-      - name: Create macOS Silicon DMG
+      - name: Copy Web assets into backend folder
         run: |
-          APP_DIR="frontend/build/macos/Build/Products/Release"
-          APP="$APP_DIR/Kivo Workspace.app"
-          STAGING_SILICON="dmg_staging_silicon"
-          mkdir -p "$STAGING_SILICON"
-          cp -R "$APP" "$STAGING_SILICON/"
-          SILICON_APP="$STAGING_SILICON/Kivo Workspace.app"
-          
-          lipo -thin arm64 "$SILICON_APP/Contents/MacOS/Kivo Workspace" -output "$SILICON_APP/Contents/MacOS/Kivo Workspace"
-          
-          mkdir -p "$SILICON_APP/Contents/Resources/bin"
-          cp -R backend/dist_silicon/kivo_backend "$SILICON_APP/Contents/Resources/bin/"
-          cp -R web "$SILICON_APP/Contents/Resources/bin/kivo_backend/"
-          
-          codesign --force --deep --sign - "$SILICON_APP"
-          ln -s /Applications "$STAGING_SILICON/Applications"
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend/"
+
+      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          codesign --force --deep --sign - "$APP"
+
+      - name: Create Silicon DMG
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          STAGING="dmg_staging_silicon"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
           hdiutil create \
             -fs HFS+ \
-            -srcfolder "$STAGING_SILICON" \
-            -volname "Kivo Workspace (Apple Silicon)" \
+            -srcfolder "$STAGING" \
+            -volname "Kivo Workspace" \
             -format UDZO \
             KivoWorkspace-macOS-Silicon.dmg
 
-      # --- 5. PRODUCE INTEL ONLY DMG ---
-      - name: Create macOS Intel DMG
-        run: |
-          APP_DIR="frontend/build/macos/Build/Products/Release"
-          APP="$APP_DIR/Kivo Workspace.app"
-          STAGING_INTEL="dmg_staging_intel"
-          mkdir -p "$STAGING_INTEL"
-          cp -R "$APP" "$STAGING_INTEL/"
-          INTEL_APP="$STAGING_INTEL/Kivo Workspace.app"
-          
-          lipo -thin x86_64 "$INTEL_APP/Contents/MacOS/Kivo Workspace" -output "$INTEL_APP/Contents/MacOS/Kivo Workspace"
-          
-          mkdir -p "$INTEL_APP/Contents/Resources/bin"
-          cp -R backend/dist_intel/kivo_backend "$INTEL_APP/Contents/Resources/bin/"
-          cp -R web "$INTEL_APP/Contents/Resources/bin/kivo_backend/"
-          
-          codesign --force --deep --sign - "$INTEL_APP"
-          ln -s /Applications "$STAGING_INTEL/Applications"
-          hdiutil create \
-            -fs HFS+ \
-            -srcfolder "$STAGING_INTEL" \
-            -volname "Kivo Workspace (Intel)" \
-            -format UDZO \
-            KivoWorkspace-macOS-Intel.dmg
-
-      # --- 6. PRODUCE UNIVERSAL DMG ---
-      - name: Create macOS Universal DMG
-        run: |
-          APP_DIR="frontend/build/macos/Build/Products/Release"
-          APP="$APP_DIR/Kivo Workspace.app"
-          STAGING_UNIVERSAL="dmg_staging_universal"
-          mkdir -p "$STAGING_UNIVERSAL"
-          cp -R "$APP" "$STAGING_UNIVERSAL/"
-          UNIVERSAL_APP="$STAGING_UNIVERSAL/Kivo Workspace.app"
-          
-          mkdir -p "$UNIVERSAL_APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend"
-          mkdir -p "$UNIVERSAL_APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend"
-          cp -R backend/dist_silicon/kivo_backend/. "$UNIVERSAL_APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
-          cp -R backend/dist_intel/kivo_backend/. "$UNIVERSAL_APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
-          cp -R web "$UNIVERSAL_APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
-          cp -R web "$UNIVERSAL_APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
-          
-          codesign --force --deep --sign - "$UNIVERSAL_APP"
-          ln -s /Applications "$STAGING_UNIVERSAL/Applications"
-          hdiutil create \
-            -fs HFS+ \
-            -srcfolder "$STAGING_UNIVERSAL" \
-            -volname "Kivo Workspace" \
-            -format UDZO \
-            KivoWorkspace-macOS-Universal.dmg
-
-      # --- 7. UPLOAD ALL THREE DMGs ---
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            KivoWorkspace-macOS-Silicon.dmg
+          files: KivoWorkspace-macOS-Silicon.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # JOB 4 · macOS Intel → KivoWorkspace-macOS-Intel.dmg
+  # ============================================================
+  build-macos-intel:
+    name: macOS Intel
+    runs-on: [self-hosted, macos, x64]
+    needs: [build-web]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.x'
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies & PyInstaller
+        run: |
+          cd backend
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r requirements_ci.txt
+          .venv/bin/pip install pyinstaller
+
+      - name: Build backend with PyInstaller
+        run: |
+          cd backend
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+
+      - name: Upload Intel Backend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kivo_backend_intel
+          path: backend/dist/kivo_backend/
+
+      - name: Flutter pub get
+        run: |
+          cd frontend
+          flutter pub get
+
+      - name: Build Flutter macOS app
+        run: |
+          cd frontend
+          flutter build macos --release
+
+      - name: Thin Flutter executable to x86_64
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          lipo -thin x86_64 "$APP/Contents/MacOS/Kivo Workspace" -output "$APP/Contents/MacOS/Kivo Workspace"
+
+      - name: Embed backend into app bundle
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          mkdir -p "$APP/Contents/Resources/bin"
+          cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Copy Web assets into backend folder
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend/"
+
+      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          codesign --force --deep --sign - "$APP"
+
+      - name: Create Intel DMG
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          STAGING="dmg_staging_intel"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -fs HFS+ \
+            -srcfolder "$STAGING" \
+            -volname "Kivo Workspace" \
+            -format UDZO \
             KivoWorkspace-macOS-Intel.dmg
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-macOS-Intel.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # JOB 5 · macOS Universal → KivoWorkspace-macOS-Universal.dmg
+  # ============================================================
+  build-macos-universal:
+    name: macOS Universal
+    runs-on: macos-14
+    needs: [build-web, build-macos-silicon, build-macos-intel]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.x'
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Flutter pub get
+        run: |
+          cd frontend
+          flutter pub get
+
+      - name: Build Flutter macOS app
+        run: |
+          cd frontend
+          flutter build macos --release
+
+      - name: Download Silicon Backend Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_backend_silicon
+          path: silicon_backend
+
+      - name: Download Intel Backend Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_backend_intel
+          path: intel_backend
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: web
+
+      - name: Embed both backends into app bundle
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          mkdir -p "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend"
+          mkdir -p "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend"
+          cp -R silicon_backend/. "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
+          cp -R intel_backend/. "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
+          cp -R web "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
+
+      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          codesign --force --deep --sign - "$APP"
+
+      - name: Create Universal DMG
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          STAGING="dmg_staging_universal"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -volname "Kivo Workspace" \
+            -format UDZO \
             KivoWorkspace-macOS-Universal.dmg
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-macOS-Universal.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1187,6 +1187,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             }).toList(),
           ),
         ),
+        const SizedBox(height: 24),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: progress.downloadProgress,
+            minHeight: 8,
+            backgroundColor: colors.border,
+            valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+          ),
+        ),
         const SizedBox(height: 40),
       ],
     );

@@ -36,7 +36,7 @@ bool FlutterWindow::OnCreate() {
   eyedropper_channel_->SetMethodCallHandler(
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
-        if (call.method() == "pickColor") {
+        if (call.method_name() == "pickColor") {
           CHOOSECOLOR cc;
           static COLORREF acrCustClr[16];
           ZeroMemory(&cc, sizeof(cc));

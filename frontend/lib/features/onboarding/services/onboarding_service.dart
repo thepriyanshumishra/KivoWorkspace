@@ -169,8 +169,32 @@ class OnboardingService {
     // 2. Check Tesseract
     result['tesseract'] = lookupBinary('tesseract');
 
-    // 3. Check Python
-    result['python'] = lookupBinary(isWindows ? 'python' : 'python3');
+    // 3. Check Python Environment
+    bool hasLocalEnv = false;
+    try {
+      final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+      final envDir = Directory(path.join(home, '.kivo_workspace', 'env'));
+      if (envDir.existsSync()) {
+        if (isWindows) {
+          final sp = Directory(path.join(envDir.path, 'Lib', 'site-packages', 'torch'));
+          hasLocalEnv = sp.existsSync();
+        } else {
+          final libDir = Directory(path.join(envDir.path, 'lib'));
+          if (libDir.existsSync()) {
+            for (final entity in libDir.listSync()) {
+              if (entity is Directory && path.basename(entity.path).startsWith('python')) {
+                final sp = Directory(path.join(entity.path, 'site-packages', 'torch'));
+                if (sp.existsSync()) {
+                  hasLocalEnv = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    result['python'] = hasLocalEnv;
 
     // 4. Check Embedding Engine (Alibaba GTE)
     bool embeddingOk = false;
@@ -496,5 +520,70 @@ class OnboardingService {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Creates a local python virtual environment and installs the required AI libraries.
+  Stream<double> installPythonDependencies() async* {
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+    final envDir = Directory(path.join(home, '.kivo_workspace', 'env'));
+    
+    // Create the env directory if it doesn't exist
+    await envDir.create(recursive: true);
+    
+    // 1. Determine the system python executable
+    final pythonCmd = Platform.isWindows ? 'python' : 'python3';
+    
+    // 2. Create the virtual environment
+    // Command: python/python3 -m venv ~/.kivo_workspace/env
+    yield 0.1; // 10% progress: Starting venv creation
+    try {
+      final venvRes = await Process.run(pythonCmd, ['-m', 'venv', envDir.path]);
+      if (venvRes.exitCode != 0) {
+        throw Exception("Failed to create Python virtual environment: ${venvRes.stderr}");
+      }
+    } catch (e) {
+      throw Exception("Could not find a valid system Python installation. Please install Python 3.10+ first: $e");
+    }
+    
+    yield 0.3; // 30% progress: Virtual environment created successfully
+    
+    // 3. Determine pip executable inside the virtual environment
+    final pipPath = Platform.isWindows
+        ? path.join(envDir.path, 'Scripts', 'pip.exe')
+        : path.join(envDir.path, 'bin', 'pip');
+        
+    // 4. Run pip install for heavy dependencies
+    // On Linux/Windows, we enforce CPU-only PyTorch to keep it lightweight (~150MB instead of ~3GB)
+    final isWindows = Platform.isWindows;
+    final isLinux = Platform.isLinux;
+    
+    final List<String> pipArgs = ['install'];
+    if (isWindows || isLinux) {
+      pipArgs.addAll(['torch', '--index-url', 'https://download.pytorch.org/whl/cpu']);
+    } else {
+      pipArgs.add('torch');
+    }
+    
+    // Start installation of torch first
+    yield 0.4; // 40% progress: Installing PyTorch CPU engine...
+    final torchProcess = await Process.start(pipPath, pipArgs);
+    await torchProcess.exitCode;
+    
+    yield 0.7; // 70% progress: PyTorch installed. Installing NLP & Vector DB dependencies...
+    
+    final otherDepsProcess = await Process.start(pipPath, [
+      'install',
+      'sentence-transformers>=3.0.1',
+      'faster-whisper>=1.1.0',
+      'transformers<5.0.0',
+      'faiss-cpu>=1.8.0',
+      'einops>=0.8.0',
+      'numba==0.59.1',
+      'llvmlite==0.42.0',
+      'yt-dlp>=2025.1.1'
+    ]);
+    await otherDepsProcess.exitCode;
+    
+    yield 1.0; // 100% progress: Completed!
   }
 }

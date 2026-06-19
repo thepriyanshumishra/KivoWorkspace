@@ -224,6 +224,34 @@ class OnboardingNotifier extends StateNotifier<OnboardingProgress> {
           if (success) {
             await _service.startOllamaService();
           }
+        } else if (bin == 'Python Environment') {
+          status[bin] = 'Creating Virtual Environment...';
+          state = state.copyWith(installStatus: Map.from(status));
+          try {
+            final stream = _service.installPythonDependencies();
+            await for (final progress in stream) {
+              if (progress < 0.3) {
+                status[bin] = 'Creating Virtual Environment...';
+              } else if (progress < 0.7) {
+                status[bin] = 'Installing PyTorch Engine...';
+              } else if (progress < 1.0) {
+                status[bin] = 'Installing NLP & Audio Libraries...';
+              } else {
+                status[bin] = 'Completed ✅';
+              }
+              state = state.copyWith(
+                installStatus: Map.from(status),
+                downloadProgress: progress,
+              );
+            }
+          } catch (e) {
+            status[bin] = 'Failed ❌';
+            state = state.copyWith(
+              installStatus: Map.from(status),
+              errorMessage: e.toString(),
+            );
+            return;
+          }
         } else {
           status[bin] = 'Extracting...';
           state = state.copyWith(installStatus: Map.from(status));

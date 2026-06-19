@@ -23,7 +23,7 @@ jobs:
             os: ubuntu-latest
             artifact_name: KivoWorkspace-Linux-x64.tar.gz
           - platform: macos-x64
-            os: macos-13
+            os: [self-hosted, macos, x64]
             artifact_name: KivoWorkspace-macOS-Intel.zip
           - platform: macos-arm64
             os: macos-14
@@ -62,7 +62,7 @@ jobs:
         run: |
           cd backend
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements_ci.txt
           pip install pyinstaller
 
       - name: Compile Backend with PyInstaller
@@ -89,6 +89,13 @@ jobs:
           # Copy compiled kivo_backend folder into the app bundle resources
           cp -R ../backend/dist/kivo_backend build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin/
           
+          # Package macOS DMG Disk Image
+          if [ "${{ matrix.platform }}" = "macos-x64" ]; then
+            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app -volname "Kivo Workspace" ../KivoWorkspace-macOS-Intel.dmg
+          else
+            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
+          fi
+          
       # Windows Build & Bundling
       - name: Build Windows App
         if: matrix.platform == 'windows-x64'
@@ -102,6 +109,9 @@ jobs:
           
           # Copy compiled backend folder into bin
           Copy-Item -Path ../backend/dist/kivo_backend -Destination build/windows/runner/Release/bin/ -Recurse -Force
+          
+          # Compile Inno Setup Installer
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows\installer.iss
 
       # Linux Build & Bundling
       - name: Build Linux App
@@ -119,6 +129,23 @@ jobs:
           
           # Copy compiled backend folder into bin
           cp -R ../backend/dist/kivo_backend build/linux/x64/release/bundle/bin/
+          
+          # Package Linux Debian package (.deb)
+          mkdir -p debian/DEBIAN
+          mkdir -p debian/usr/share/kivo-workspace
+          mkdir -p debian/usr/bin
+          cp -R build/linux/x64/release/bundle/* debian/usr/share/kivo-workspace/
+          echo '#!/bin/sh' > debian/usr/bin/kivo-workspace
+          echo 'exec /usr/share/kivo-workspace/kivo_workspace "$@"' >> debian/usr/bin/kivo-workspace
+          chmod +x debian/usr/bin/kivo-workspace
+          echo "Package: kivo-workspace" > debian/DEBIAN/control
+          echo "Version: 1.0.0" >> debian/DEBIAN/control
+          echo "Section: utils" >> debian/DEBIAN/control
+          echo "Priority: optional" >> debian/DEBIAN/control
+          echo "Architecture: amd64" >> debian/DEBIAN/control
+          echo "Maintainer: Kivo <support@kivo.com>" >> debian/DEBIAN/control
+          echo "Description: Edge-first AI Knowledge Workspace" >> debian/DEBIAN/control
+          dpkg-deb --build debian ../KivoWorkspace-Linux.deb
 
       # --- 4. Package Artifacts ---
       - name: Package macOS App Bundle
@@ -133,6 +160,7 @@ jobs:
         run: |
           cd frontend/build/windows/runner/Release
           Compress-Archive -Path * -DestinationPath ../../../../../${{ matrix.artifact_name }} -Force
+          Copy-Item -Path ../../KivoWorkspace-Setup.exe -Destination ../../../../../KivoWorkspace-Windows-Setup.exe -Force
 
       - name: Package Linux Binary Bundle
         if: matrix.platform == 'linux-x64'
@@ -144,7 +172,13 @@ jobs:
       - name: Publish Artifacts to GitHub Releases
         uses: softprops/action-gh-release@v1
         with:
-          files: ${{ matrix.artifact_name }}
+          files: |
+            ${{ matrix.artifact_name }}
+            KivoWorkspace-Windows-Setup.exe
+            KivoWorkspace-macOS-Intel.dmg
+            KivoWorkspace-macOS-Silicon.dmg
+            KivoWorkspace-Linux.deb
+          fail_on_unmatched_files: false
           draft: true # Creates a draft release so you can review it before making it public
           prerelease: false
         env:

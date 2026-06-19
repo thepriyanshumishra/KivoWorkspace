@@ -6,8 +6,35 @@
 #                   ensures storage directories exist on startup.
 
 import os
+import sys
 import shutil
 import requests
+from pathlib import Path
+
+# Detect local virtual environment and inject its site-packages into sys.path
+def inject_local_env():
+    home = Path.home()
+    env_dir = home / ".kivo_workspace" / "env"
+    if env_dir.exists():
+        site_packages = None
+        if os.name == "nt":  # Windows
+            sp = env_dir / "Lib" / "site-packages"
+            if sp.exists():
+                site_packages = sp
+        else:  # macOS/Linux
+            lib_dir = env_dir / "lib"
+            if lib_dir.exists():
+                for python_dir in lib_dir.iterdir():
+                    if python_dir.is_dir() and python_dir.name.startswith("python"):
+                        sp = python_dir / "site-packages"
+                        if sp.exists():
+                            site_packages = sp
+                            break
+        if site_packages:
+            sys.path.insert(0, str(site_packages))
+            print(f"[BOOTSTRAP] Injected local dependencies from: {site_packages}")
+
+inject_local_env()
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"

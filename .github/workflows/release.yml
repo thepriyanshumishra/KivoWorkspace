@@ -115,18 +115,25 @@ jobs:
           cd frontend
           flutter build macos --release
 
-          # Create Resources/bin folder inside the app bundle
-          mkdir -p build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin
+          # Create Resources/bin folder inside the app bundle (with correct casing)
+          mkdir -p "build/macos/Build/Products/Release/Kivo Workspace.app/Contents/Resources/bin"
 
-          # Copy compiled kivo_backend into the app bundle
-          cp -R ../backend/dist/kivo_backend build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin/
+          # Copy compiled kivo_backend into the app bundle (with correct casing)
+          cp -R ../backend/dist/kivo_backend "build/macos/Build/Products/Release/Kivo Workspace.app/Contents/Resources/bin/"
 
-          # Create DMG disk image
+          # Set up staging folder for a clean drag-and-drop DMG installer
+          mkdir -p build/macos/Build/Products/Release/dmg_staging
+          cp -R "build/macos/Build/Products/Release/Kivo Workspace.app" build/macos/Build/Products/Release/dmg_staging/
+          
+          # Create symbolic link to /Applications for easy drag-and-drop installation
+          ln -s /Applications build/macos/Build/Products/Release/dmg_staging/Applications
+
+          # Create DMG disk image from the staging folder
           if [ "${{ matrix.platform }}" = "macos-x64" ]; then
-            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app \
+            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
               -volname "Kivo Workspace" ../KivoWorkspace-macOS-Intel.dmg
           else
-            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app \
+            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
               -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
           fi
 
@@ -189,7 +196,7 @@ jobs:
         if: startsWith(matrix.platform, 'macos')
         run: |
           cd frontend/build/macos/Build/Products/Release
-          zip -r ../../../../../../${{ matrix.artifact_name }} kivo_workspace.app
+          zip -r ../../../../../../${{ matrix.artifact_name }} "Kivo Workspace.app"
 
       # Flutter 3.x Windows output: build/windows/x64/runner/Release/
       # From that folder: 6 levels up = workspace root, 3 levels up = build/windows/ (Inno Setup output dir)

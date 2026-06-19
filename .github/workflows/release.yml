@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v3
 
       # --- 1. Setup SDKs ---
-      - name: Setup Java (required for Flutter Android/Build tools)
+      - name: Setup Java (required for Flutter build tools)
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
@@ -52,20 +52,50 @@ jobs:
           flutter config --enable-macos-desktop
           flutter config --enable-linux-desktop
 
+      # Setup Python — skipped for self-hosted macOS x64 (uses system Python 3 at /usr/local/bin/python3)
       - name: Setup Python
+        if: matrix.platform != 'macos-x64'
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
+      # Verify system Python is available on self-hosted macOS Intel runner
+      - name: Verify System Python (macOS self-hosted only)
+        if: matrix.platform == 'macos-x64'
+        run: |
+          python3 --version
+          pip3 --version
+
       # --- 2. Build Python Backend ---
-      - name: Install PyInstaller & Backend Dependencies
+
+      # Unix (Linux + both macOS): use python3/pip3
+      - name: Install PyInstaller & Backend Dependencies (Unix)
+        if: matrix.platform != 'windows-x64'
+        run: |
+          cd backend
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements_ci.txt
+          python3 -m pip install pyinstaller
+
+      # Windows: use python/pip (provided by actions/setup-python above)
+      - name: Install PyInstaller & Backend Dependencies (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
         run: |
           cd backend
           python -m pip install --upgrade pip
-          pip install -r requirements_ci.txt
-          pip install pyinstaller
+          python -m pip install -r requirements_ci.txt
+          python -m pip install pyinstaller
 
-      - name: Compile Backend with PyInstaller
+      - name: Compile Backend with PyInstaller (Unix)
+        if: matrix.platform != 'windows-x64'
+        run: |
+          cd backend
+          python3 -m PyInstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+
+      - name: Compile Backend with PyInstaller (Windows)
+        if: matrix.platform == 'windows-x64'
+        shell: pwsh
         run: |
           cd backend
           pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
@@ -82,35 +112,40 @@ jobs:
         run: |
           cd frontend
           flutter build macos --release
-          
-          # Create resources bin folder inside the app bundle
+
+          # Create Resources/bin folder inside the app bundle
           mkdir -p build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin
-          
-          # Copy compiled kivo_backend folder into the app bundle resources
+
+          # Copy compiled kivo_backend into the app bundle
           cp -R ../backend/dist/kivo_backend build/macos/Build/Products/Release/kivo_workspace.app/Contents/Resources/bin/
-          
-          # Package macOS DMG Disk Image
+
+          # Create DMG disk image
           if [ "${{ matrix.platform }}" = "macos-x64" ]; then
-            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app -volname "Kivo Workspace" ../KivoWorkspace-macOS-Intel.dmg
+            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app \
+              -volname "Kivo Workspace" ../KivoWorkspace-macOS-Intel.dmg
           else
-            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
+            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/kivo_workspace.app \
+              -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
           fi
-          
+
       # Windows Build & Bundling
+      # NOTE: Flutter 3.x outputs to build/windows/x64/runner/Release/ (not build/windows/runner/Release/)
       - name: Build Windows App
         if: matrix.platform == 'windows-x64'
         shell: pwsh
         run: |
           cd frontend
           flutter build windows --release
-          
-          # Create bin folder alongside the windows executable
-          New-Item -ItemType Directory -Path build/windows/runner/Release/bin -Force
-          
-          # Copy compiled backend folder into bin
-          Copy-Item -Path ../backend/dist/kivo_backend -Destination build/windows/runner/Release/bin/ -Recurse -Force
-          
-          # Compile Inno Setup Installer
+
+          # Create bin folder inside the Flutter 3.x output directory
+          New-Item -ItemType Directory -Path build/windows/x64/runner/Release/bin -Force
+
+          # Copy compiled backend into bin
+          Copy-Item -Path ../backend/dist/kivo_backend -Destination build/windows/x64/runner/Release/bin/ -Recurse -Force
+
+          # Compile Inno Setup installer
+          # ISCC sets working dir to the .iss file location (frontend/windows/),
+          # so installer.iss paths are relative to frontend/windows/
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows\installer.iss
 
       # Linux Build & Bundling
@@ -120,17 +155,17 @@ jobs:
           # Install Linux desktop build requirements
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
-          
+
           cd frontend
           flutter build linux --release
-          
+
           # Create bin folder alongside the linux binary bundle
           mkdir -p build/linux/x64/release/bundle/bin
-          
-          # Copy compiled backend folder into bin
+
+          # Copy compiled backend into bin
           cp -R ../backend/dist/kivo_backend build/linux/x64/release/bundle/bin/
-          
-          # Package Linux Debian package (.deb)
+
+          # Build .deb package
           mkdir -p debian/DEBIAN
           mkdir -p debian/usr/share/kivo-workspace
           mkdir -p debian/usr/bin
@@ -154,13 +189,15 @@ jobs:
           cd frontend/build/macos/Build/Products/Release
           zip -r ../../../../../../${{ matrix.artifact_name }} kivo_workspace.app
 
+      # Flutter 3.x Windows output: build/windows/x64/runner/Release/
+      # From that folder: 6 levels up = workspace root, 3 levels up = build/windows/ (Inno Setup output dir)
       - name: Package Windows Executable Folder
         if: matrix.platform == 'windows-x64'
         shell: pwsh
         run: |
-          cd frontend/build/windows/runner/Release
-          Compress-Archive -Path * -DestinationPath ../../../../../${{ matrix.artifact_name }} -Force
-          Copy-Item -Path ../../KivoWorkspace-Setup.exe -Destination ../../../../../KivoWorkspace-Windows-Setup.exe -Force
+          cd frontend/build/windows/x64/runner/Release
+          Compress-Archive -Path * -DestinationPath ../../../../../../${{ matrix.artifact_name }} -Force
+          Copy-Item -Path ../../../KivoWorkspace-Setup.exe -Destination ../../../../../../KivoWorkspace-Windows-Setup.exe -Force
 
       - name: Package Linux Binary Bundle
         if: matrix.platform == 'linux-x64'

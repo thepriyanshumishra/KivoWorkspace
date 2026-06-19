@@ -13,6 +13,10 @@ import '../../onboarding/services/onboarding_prefs.dart';
 import '../../onboarding/providers/onboarding_provider.dart';
 import '../../tutorial/providers/tutorial_provider.dart';
 import '../../tutorial/screens/tutorial_overlay.dart';
+import 'dart:io';
+import 'package:path/path.dart' as path;
+import '../../../core/constants/app_constants.dart';
+import '../../../core/services/update_service.dart';
 
 final allWorkspaceStatsProvider = FutureProvider.autoDispose<Map<String, Map<String, dynamic>>>((ref) async {
   final workspacesVal = ref.watch(workspacesProvider);
@@ -45,6 +49,20 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedTab = 0; // 0: Dashboard, 1: Analytics
   final TextEditingController _searchController = TextEditingController();
+
+  // State variables for in-app updates
+  bool _isCheckingUpdate = false;
+  UpdateInfo? _updateInfo;
+  double? _updateDownloadProgress;
+  String _updateStatusText = '';
+  bool _updateError = false;
+
+  void _updateState(StateSetter setSheetState, VoidCallback fn) {
+    setSheetState(fn);
+    if (mounted) {
+      setState(fn);
+    }
+  }
 
   @override
   void initState() {
@@ -116,8 +134,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
-      builder: (ctx) => Consumer(
-        builder: (ctx, ref, _) {
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Consumer(
+          builder: (ctx, ref, _) {
           final currentFont = ref.watch(fontProvider);
           final activeAccent = ref.watch(accentColorProvider);
           final notificationsOn = ref.watch(notificationsEnabledProvider);
@@ -280,6 +299,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 20),
+                  const Divider(),
+                  const SizedBox(height: 12),
+
+                  // Software Update Section
+                  _buildUpdateSection(context, setSheetState),
                   const SizedBox(height: 20),
                   const Divider(),
                   const SizedBox(height: 12),
@@ -483,7 +508,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
                   const SizedBox(height: 24),
                   Text(
-                    'Kivo Workspace v1.0.2-stealth',
+                    'Kivo Workspace v${AppConstants.appVersion}',
                     style: TextStyle(fontSize: 11, color: colors.textMuted, fontFamily: 'IBM Plex Mono'),
                   ),
                 ],
@@ -492,8 +517,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           );
         },
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildTopTabBar(BuildContext context) {
     final colors = context.colors;
@@ -638,6 +664,202 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildUpdateSection(BuildContext context, StateSetter setSheetState) {
+    final colors = context.colors;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final updateService = UpdateService();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Software Update',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: colors.textMuted,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF242424) : const Color(0xFFF9F9F8),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Current Version: v${AppConstants.appVersion}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: colors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _updateStatusText.isNotEmpty
+                              ? _updateStatusText
+                              : 'Check for the latest updates from GitHub.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: _updateError ? colors.statusFailed : colors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (!_isCheckingUpdate && _updateDownloadProgress == null)
+                    ElevatedButton(
+                      onPressed: () async {
+                        _updateState(setSheetState, () {
+                          _isCheckingUpdate = true;
+                          _updateStatusText = 'Checking for updates...';
+                          _updateError = false;
+                        });
+
+                        final info = await updateService.checkForUpdate();
+
+                        _updateState(setSheetState, () {
+                          _isCheckingUpdate = false;
+                          _updateInfo = info;
+                          if (info.hasUpdate) {
+                            _updateStatusText = 'New version v${info.latestVersion} available!';
+                          } else if (info.latestVersion.isNotEmpty) {
+                            _updateStatusText = 'Kivo Workspace is up-to-date.';
+                          } else {
+                            _updateStatusText = 'Failed to check for updates.';
+                            _updateError = true;
+                          }
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      child: const Text('Check'),
+                    ),
+                  if (_isCheckingUpdate)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                ],
+              ),
+              if (_updateInfo != null && _updateInfo!.hasUpdate && _updateDownloadProgress == null) ...[
+                const SizedBox(height: 12),
+                const Divider(),
+                const SizedBox(height: 12),
+                Text(
+                  'What\'s New:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: colors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _updateInfo!.releaseNotes,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: colors.textSecondary,
+                    height: 1.4,
+                  ),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      _updateState(setSheetState, () {
+                        _updateDownloadProgress = 0.0;
+                        _updateStatusText = 'Starting download...';
+                      });
+
+                      final ext = Platform.isWindows ? 'exe' : (Platform.isMacOS ? 'dmg' : 'AppImage');
+                      final assetName = 'KivoWorkspace-Update.$ext';
+                      final tempDir = Directory.systemTemp;
+                      final savePath = path.join(tempDir.path, assetName);
+
+                      try {
+                        final stream = updateService.downloadUpdate(_updateInfo!.downloadUrl, savePath);
+                        await for (final progress in stream) {
+                          _updateState(setSheetState, () {
+                            _updateDownloadProgress = progress;
+                            _updateStatusText = 'Downloading update: ${(progress * 100).toStringAsFixed(0)}%';
+                          });
+                        }
+
+                        _updateState(setSheetState, () {
+                          _updateStatusText = Platform.isWindows
+                              ? 'Download complete. Launching installer...'
+                              : (Platform.isMacOS
+                                  ? 'Download complete. Mounting disk image...'
+                                  : 'Download complete. Launching file...');
+                        });
+
+                        await updateService.applyUpdate(savePath);
+
+                        if (Platform.isMacOS) {
+                          _updateState(setSheetState, () {
+                            _updateStatusText = 'Disk image mounted. Please close Kivo, drag it to Applications, and restart.';
+                            _updateDownloadProgress = null;
+                            _updateInfo = null;
+                          });
+                        }
+                      } catch (e) {
+                        _updateState(setSheetState, () {
+                          _updateStatusText = 'Download failed: $e';
+                          _updateDownloadProgress = null;
+                          _updateError = true;
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.download_rounded, size: 14),
+                    label: const Text('Download & Install Update', style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: colors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      textStyle: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
+              ],
+              if (_updateDownloadProgress != null) ...[
+                const SizedBox(height: 12),
+                LinearProgressIndicator(
+                  value: _updateDownloadProgress,
+                  backgroundColor: colors.border,
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 

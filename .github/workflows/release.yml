@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Previous Run ID to download backend artifacts'
+        required: false
+        default: ''
+      version:
+        description: 'Release version (e.g., v1.0.2)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -16,6 +26,7 @@ jobs:
   build-web:
     name: Flutter Web Assets
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
@@ -56,6 +67,7 @@ jobs:
     name: Windows (.exe)
     runs-on: windows-2022
     needs: [build-web]
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
@@ -155,6 +167,7 @@ jobs:
     name: Linux (.deb/ .rpm/ .appimage)
     runs-on: ubuntu-latest
     needs: [build-web]
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
@@ -278,6 +291,7 @@ jobs:
     name: macOS Silicon
     runs-on: macos-14
     needs: [build-web]
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
@@ -390,6 +404,7 @@ jobs:
     name: macOS Intel
     runs-on: [self-hosted, macos, x64]
     needs: [build-web]
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
@@ -497,6 +512,9 @@ jobs:
     name: macOS Universal
     runs-on: macos-14
     needs: [build-web, build-macos-silicon, build-macos-intel]
+    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.build-web.result == 'success' && needs.build-macos-silicon.result == 'success' && needs.build-macos-intel.result == 'success'))
+    env:
+      RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
 
     steps:
       - name: Checkout
@@ -528,22 +546,34 @@ jobs:
           flutter build macos --release
 
       - name: Download Silicon Backend Artifact
+        if: github.event_name == 'push'
         uses: actions/download-artifact@v4
         with:
           name: kivo_backend_silicon
           path: silicon_backend
 
       - name: Download Intel Backend Artifact
+        if: github.event_name == 'push'
         uses: actions/download-artifact@v4
         with:
           name: kivo_backend_intel
           path: intel_backend
 
       - name: Download Web Assets Artifact
+        if: github.event_name == 'push'
         uses: actions/download-artifact@v4
         with:
           name: kivo_web_assets
           path: web
+
+      - name: Download Artifacts for Manual Dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          gh run download ${{ github.event.inputs.run_id }} -n kivo_backend_silicon -d silicon_backend
+          gh run download ${{ github.event.inputs.run_id }} -n kivo_backend_intel -d intel_backend
+          gh run download ${{ github.event.inputs.run_id }} -n kivo_web_assets -d web
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Embed both backends into app bundle
         run: |
@@ -568,9 +598,11 @@ jobs:
           cp -R "$APP" "$STAGING/"
           ln -s /Applications "$STAGING/Applications"
           hdiutil create \
+            -fs HFS+ \
+            -srcfolder "$STAGING" \
             -volname "Kivo Workspace" \
             -format UDZO \
-            KivoWorkspace-macOS-Universal-${{ github.ref_name }}.dmg
+            KivoWorkspace-macOS-Universal-${{ env.RELEASE_VERSION }}.dmg
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -578,6 +610,6 @@ jobs:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Universal-${{ github.ref_name }}.dmg
+          files: KivoWorkspace-macOS-Universal-${{ env.RELEASE_VERSION }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

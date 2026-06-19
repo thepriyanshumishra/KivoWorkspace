@@ -22,9 +22,6 @@ jobs:
           - platform: linux-x64
             os: ubuntu-latest
             artifact_name: KivoWorkspace-Linux-x64.tar.gz
-          - platform: macos-x64
-            os: macos-13
-            artifact_name: KivoWorkspace-macOS-Intel.zip
           - platform: macos-arm64
             os: macos-14
             artifact_name: KivoWorkspace-macOS-Silicon.zip
@@ -121,13 +118,8 @@ jobs:
           ln -s /Applications build/macos/Build/Products/Release/dmg_staging/Applications
 
           # Create DMG disk image from the staging folder
-          if [ "${{ matrix.platform }}" = "macos-x64" ]; then
-            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
-              -volname "Kivo Workspace" ../KivoWorkspace-macOS-Intel.dmg
-          else
-            hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
-              -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
-          fi
+          hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
+            -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
 
       # Windows Build & Bundling
       # NOTE: Flutter 3.x outputs to build/windows/x64/runner/Release/ (not build/windows/runner/Release/)

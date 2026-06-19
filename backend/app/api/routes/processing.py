@@ -16,6 +16,7 @@ from app.models.processing import ProcessingStatusResponse
 from app.api.routes.workspaces import get_workspace_dir, get_metadata_path
 from app.api.routes.sources import load_sources, save_sources
 from app.models.workspace import Workspace
+from app.core.database import init_db
 
 logger = logging.getLogger("kivo.processing")
 router = APIRouter()
@@ -23,6 +24,14 @@ router = APIRouter()
 # In-memory database of active processing jobs
 # workspace_id -> Dict
 processing_jobs: Dict[str, Dict[str, Any]] = {}
+
+def _resolve_source_path(relative_path: str) -> FilePath:
+    if not relative_path:
+        return None
+    p = FilePath(relative_path)
+    if p.is_absolute():
+        return p
+    return settings.storage_dir.parent / p
 
 def _update_sources_status_by_step(sources: list, step: str, status: str):
     for src in sources:
@@ -63,6 +72,7 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
         return
         
     try:
+        init_db(workspace_id)
         sources = load_sources(workspace_id)
         
         for idx, step in enumerate(steps):
@@ -87,11 +97,14 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             logger.info(f"Cancellation requested during PDF processing. Stopping thread for {workspace_id}")
                             return
                         try:
-                            file_path = FilePath(src.path) if src.path else None
+                            file_path = _resolve_source_path(src.path)
                             if file_path and file_path.exists():
                                 res = processor.process(file_path, workspace_id, src.id)
                                 src.stats = res["stats"]
                                 src.summary = res["summary"]
+                            else:
+                                logger.error(f"PDF source file {src.name} not found at path: {file_path}")
+                                src.status = "failed"
                         except Exception as e:
                             logger.error(f"Failed to process PDF source {src.id}: {e}")
                             src.status = "failed"
@@ -104,11 +117,14 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             logger.info(f"Cancellation requested during Image processing. Stopping thread for {workspace_id}")
                             return
                         try:
-                            file_path = FilePath(src.path) if src.path else None
+                            file_path = _resolve_source_path(src.path)
                             if file_path and file_path.exists():
                                 res = processor.process(file_path, workspace_id, src.id)
                                 src.stats = res["stats"]
                                 src.summary = res["summary"]
+                            else:
+                                logger.error(f"Image source file {src.name} not found at path: {file_path}")
+                                src.status = "failed"
                         except Exception as e:
                             logger.error(f"Failed to process Image source {src.id}: {e}")
                             src.status = "failed"
@@ -121,11 +137,14 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             logger.info(f"Cancellation requested during Audio processing. Stopping thread for {workspace_id}")
                             return
                         try:
-                            file_path = FilePath(src.path) if src.path else None
+                            file_path = _resolve_source_path(src.path)
                             if file_path and file_path.exists():
                                 res = processor.process(file_path, workspace_id, src.id)
                                 src.stats = res["stats"]
                                 src.summary = res["summary"]
+                            else:
+                                logger.error(f"Audio source file {src.name} not found at path: {file_path}")
+                                src.status = "failed"
                         except Exception as e:
                             logger.error(f"Failed to process Audio source {src.id}: {e}")
                             src.status = "failed"
@@ -175,11 +194,14 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             logger.info(f"Cancellation requested during Text processing. Stopping thread for {workspace_id}")
                             return
                         try:
-                            file_path = FilePath(src.path) if src.path else None
+                            file_path = _resolve_source_path(src.path)
                             if file_path and file_path.exists():
                                 res = processor.process(file_path, workspace_id, src.id)
                                 src.stats = res["stats"]
                                 src.summary = res["summary"]
+                            else:
+                                logger.error(f"Text source file {src.name} not found at path: {file_path}")
+                                src.status = "failed"
                         except Exception as e:
                             logger.error(f"Failed to process Text source {src.id}: {e}")
                             src.status = "failed"
@@ -192,11 +214,14 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
                             logger.info(f"Cancellation requested during Email processing. Stopping thread for {workspace_id}")
                             return
                         try:
-                            file_path = FilePath(src.path) if src.path else None
+                            file_path = _resolve_source_path(src.path)
                             if file_path and file_path.exists():
                                 res = processor.process(file_path, workspace_id, src.id)
                                 src.stats = res["stats"]
                                 src.summary = res["summary"]
+                            else:
+                                logger.error(f"Email source file {src.name} not found at path: {file_path}")
+                                src.status = "failed"
                         except Exception as e:
                             logger.error(f"Failed to process Email source {src.id}: {e}")
                             src.status = "failed"

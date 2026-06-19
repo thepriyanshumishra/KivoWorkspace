@@ -179,14 +179,25 @@ class OnboardingService {
           final sp = Directory(path.join(envDir.path, 'Lib', 'site-packages', 'torch'));
           hasLocalEnv = sp.existsSync();
         } else {
+          final pythonExe = _resolvePythonExecutable();
+          final exeName = path.basename(pythonExe); // e.g. "python3.12" or "python3"
           final libDir = Directory(path.join(envDir.path, 'lib'));
           if (libDir.existsSync()) {
             for (final entity in libDir.listSync()) {
               if (entity is Directory && path.basename(entity.path).startsWith('python')) {
-                final sp = Directory(path.join(entity.path, 'site-packages', 'torch'));
-                if (sp.existsSync()) {
-                  hasLocalEnv = true;
-                  break;
+                final folderName = path.basename(entity.path); // e.g. "python3.9" or "python3.12"
+                bool versionMatches = false;
+                if (exeName == 'python3') {
+                  versionMatches = true;
+                } else {
+                  versionMatches = folderName == exeName;
+                }
+                if (versionMatches) {
+                  final sp = Directory(path.join(entity.path, 'site-packages', 'torch'));
+                  if (sp.existsSync()) {
+                    hasLocalEnv = true;
+                    break;
+                  }
                 }
               }
             }
@@ -522,16 +533,69 @@ class OnboardingService {
     }
   }
 
+  String _resolvePythonExecutable() {
+    final isWindows = Platform.isWindows;
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
+    final List<String> searchDirs = [];
+
+    if (Platform.isMacOS) {
+      searchDirs.addAll([
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        '/usr/bin',
+        '/bin',
+        path.join(home, '.local', 'bin'),
+      ]);
+    } else if (Platform.isLinux) {
+      searchDirs.addAll([
+        '/usr/bin',
+        '/usr/local/bin',
+        '/bin',
+        path.join(home, '.local', 'bin'),
+      ]);
+    } else if (isWindows) {
+      final localAppData = Platform.environment['LOCALAPPDATA'] ?? path.join(home, 'AppData', 'Local');
+      searchDirs.addAll([
+        path.join(localAppData, 'Programs', 'Python', 'Python312'),
+        path.join(localAppData, 'Programs', 'Python', 'Python311'),
+        path.join(localAppData, 'Programs', 'Python', 'Python310'),
+      ]);
+    }
+
+    if (!isWindows) {
+      for (final dir in searchDirs) {
+        final file = File(path.join(dir, 'python3.12'));
+        if (file.existsSync()) return file.path;
+      }
+      for (final dir in searchDirs) {
+        final file = File(path.join(dir, 'python3'));
+        if (file.existsSync()) return file.path;
+      }
+      return 'python3';
+    } else {
+      for (final dir in searchDirs) {
+        final file = File(path.join(dir, 'python.exe'));
+        if (file.existsSync()) return file.path;
+      }
+      return 'python';
+    }
+  }
+
   /// Creates a local python virtual environment and installs the required AI libraries.
   Stream<double> installPythonDependencies() async* {
     final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
     final envDir = Directory(path.join(home, '.kivo_workspace', 'env'));
     
-    // Create the env directory if it doesn't exist
+    // Clear the env directory first to prevent python version mixing (e.g. 3.9 vs 3.12)
+    if (envDir.existsSync()) {
+      try {
+        await envDir.delete(recursive: true);
+      } catch (_) {}
+    }
     await envDir.create(recursive: true);
     
     // 1. Determine the system python executable
-    final pythonCmd = Platform.isWindows ? 'python' : 'python3';
+    final pythonCmd = _resolvePythonExecutable();
     
     // 2. Create the virtual environment
     // Command: python/python3 -m venv ~/.kivo_workspace/env

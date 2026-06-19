@@ -19,16 +19,36 @@ class WorkspacesNotifier extends StateNotifier<AsyncValue<List<Workspace>>> {
   }
 
   Future<void> loadWorkspaces() async {
-    try {
-      // Keep displaying old data if it is just a refresh
-      final hasData = state.hasValue;
-      if (!hasData) {
-        state = const AsyncValue.loading();
+    // Keep displaying old data if it is just a refresh
+    final hasData = state.hasValue;
+    if (!hasData) {
+      state = const AsyncValue.loading();
+    }
+
+    int retries = 0;
+    const maxRetries = 15; // Try for up to 30 seconds
+
+    while (true) {
+      try {
+        final list = await _service.getWorkspaces();
+        state = AsyncValue.data(list);
+        break;
+      } catch (e, stackTrace) {
+        final errStr = e.toString();
+        final isConnectionError = errStr.contains('Connection refused') ||
+            errStr.contains('SocketException') ||
+            errStr.contains('Connection failed') ||
+            errStr.contains('Failed host lookup');
+
+        if (isConnectionError && retries < maxRetries) {
+          retries++;
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
+        }
+
+        state = AsyncValue.error(e, stackTrace);
+        break;
       }
-      final list = await _service.getWorkspaces();
-      state = AsyncValue.data(list);
-    } catch (e, stackTrace) {
-      state = AsyncValue.error(e, stackTrace);
     }
   }
 

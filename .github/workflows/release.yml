@@ -136,7 +136,7 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item "frontend\build\windows\KivoWorkspace-Setup.exe" `
-                    "KivoWorkspace-Windows.exe" -Force
+                    "KivoWorkspace-Windows-${{ github.ref_name }}.exe" -Force
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -144,7 +144,7 @@ jobs:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-Windows.exe
+          files: KivoWorkspace-Windows-${{ github.ref_name }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -235,14 +235,14 @@ jobs:
           printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Kivo Workspace\nComment=Edge-first AI Knowledge Workspace\nExec=/usr/bin/kivo-workspace\nIcon=kivo-workspace\nCategories=Utility;\nTerminal=false\n' > "$PKG/usr/share/applications/kivo-workspace.desktop"
           cp frontend/assets/images/app_logo.png "$PKG/usr/share/pixmaps/kivo-workspace.png"
           printf 'Package: kivo-workspace\nVersion: 1.0.0\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Kivo <support@kivo.com>\nDescription: Edge-first AI Knowledge Workspace\n An intelligent workspace that runs entirely on-device.\n' > "$PKG/DEBIAN/control"
-          dpkg-deb --build "$PKG" KivoWorkspace-Linux.deb
+          dpkg-deb --build "$PKG" KivoWorkspace-Linux-${{ github.ref_name }}.deb
 
       - name: Build .rpm package (via alien)
         run: |
-          sudo alien --to-rpm --scripts KivoWorkspace-Linux.deb
+          sudo alien --to-rpm --scripts KivoWorkspace-Linux-${{ github.ref_name }}.deb
           RPM_FILE=$(ls kivo-workspace*.rpm 2>/dev/null | head -1)
           if [ -z "$RPM_FILE" ]; then echo "ERROR: .rpm not found" && exit 1; fi
-          mv "$RPM_FILE" KivoWorkspace-Linux.rpm
+          mv "$RPM_FILE" KivoWorkspace-Linux-${{ github.ref_name }}.rpm
 
       - name: Build .AppImage
         run: |
@@ -256,7 +256,7 @@ jobs:
           cp frontend/assets/images/app_logo.png "$APPDIR/kivo-workspace.png"
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
           chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" KivoWorkspace-Linux.AppImage
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" KivoWorkspace-Linux-${{ github.ref_name }}.AppImage
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -265,9 +265,9 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            KivoWorkspace-Linux.deb
-            KivoWorkspace-Linux.rpm
-            KivoWorkspace-Linux.AppImage
+            KivoWorkspace-Linux-${{ github.ref_name }}.deb
+            KivoWorkspace-Linux-${{ github.ref_name }}.rpm
+            KivoWorkspace-Linux-${{ github.ref_name }}.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -371,7 +371,7 @@ jobs:
             -srcfolder "$STAGING" \
             -volname "Kivo Workspace" \
             -format UDZO \
-            KivoWorkspace-macOS-Silicon.dmg
+            KivoWorkspace-macOS-Silicon-${{ github.ref_name }}.dmg
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -379,7 +379,7 @@ jobs:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Silicon.dmg
+          files: KivoWorkspace-macOS-Silicon-${{ github.ref_name }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -483,7 +483,7 @@ jobs:
             -srcfolder "$STAGING" \
             -volname "Kivo Workspace" \
             -format UDZO \
-            KivoWorkspace-macOS-Intel.dmg
+            KivoWorkspace-macOS-Intel-${{ github.ref_name }}.dmg
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -491,7 +491,7 @@ jobs:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Intel.dmg
+          files: KivoWorkspace-macOS-Intel-${{ github.ref_name }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -575,7 +575,7 @@ jobs:
           hdiutil create \
             -volname "Kivo Workspace" \
             -format UDZO \
-            KivoWorkspace-macOS-Universal.dmg
+            KivoWorkspace-macOS-Universal-${{ github.ref_name }}.dmg
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -583,6 +583,6 @@ jobs:
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Universal.dmg
+          files: KivoWorkspace-macOS-Universal-${{ github.ref_name }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

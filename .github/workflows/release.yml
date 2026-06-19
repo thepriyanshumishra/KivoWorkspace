@@ -1,44 +1,47 @@
-name: Kivo Workspace Auto-Release
+name: Kivo Workspace Release
 
 on:
   push:
     tags:
-      - 'v*' # Triggers workflow only when version tags are pushed (e.g. v1.0.0)
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  # --- WINDOWS BUILD JOB ---
-  build-windows:
-    name: Build Windows Release Package
-    runs-on: windows-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
+  # ============================================================
+  # JOB 1 · Windows → KivoWorkspace-Windows-Setup.exe
+  # ============================================================
+  build-windows:
+    name: Windows Installer (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-          flutter-version: '3.38.x'
+          channel: stable
+          flutter-version: '3.32.x'
 
-      - name: Enable Desktop Support
-        run: |
-          flutter config --enable-windows-desktop
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller & Backend Dependencies
+      - name: Install backend dependencies & PyInstaller
         shell: pwsh
         run: |
           cd backend
@@ -46,67 +49,90 @@ jobs:
           python -m pip install -r requirements_ci.txt
           python -m pip install pyinstaller
 
-      - name: Compile Backend with PyInstaller
+      - name: Build backend (Windows x64)
         shell: pwsh
         run: |
           cd backend
           pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
 
-      - name: Fetch Dart Packages
+      - name: Flutter pub get
         run: |
           cd frontend
           flutter pub get
 
-      - name: Build Windows App
+      - name: Build Flutter Windows app
         shell: pwsh
         run: |
           cd frontend
           flutter build windows --release
-          New-Item -ItemType Directory -Path build/windows/x64/runner/Release/bin -Force
-          Copy-Item -Path ../backend/dist/kivo_backend -Destination build/windows/x64/runner/Release/bin/ -Recurse -Force
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows\installer.iss
 
-      - name: Publish Artifacts to GitHub Releases
-        uses: softprops/action-gh-release@v1
+      - name: Copy backend into Flutter release bundle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "frontend\build\windows\x64\runner\Release\bin" -Force
+          Copy-Item -Path "backend\dist\kivo_backend" `
+                    -Destination "frontend\build\windows\x64\runner\Release\bin\" `
+                    -Recurse -Force
+
+      - name: Build installer with Inno Setup
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "frontend\windows\installer.iss"
+
+      - name: Rename installer to release filename
+        shell: pwsh
+        run: |
+          Copy-Item "frontend\build\windows\KivoWorkspace-Setup.exe" `
+                    "KivoWorkspace-Windows-Setup.exe" -Force
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: |
-            KivoWorkspace-Windows-Setup.exe
-          fail_on_unmatched_files: false
           draft: true
           prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-Windows-Setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # --- LINUX BUILD JOB ---
+  # ============================================================
+  # JOB 2 · Linux → .deb  .rpm  .AppImage
+  # ============================================================
   build-linux:
-    name: Build Linux Release Package
+    name: Linux Packages (.deb / .rpm / .AppImage)
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-          flutter-version: '3.38.x'
+          channel: stable
+          flutter-version: '3.32.x'
 
-      - name: Enable Desktop Support
+      - name: Enable Linux desktop & install system dependencies
         run: |
           flutter config --enable-linux-desktop
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev \
+            alien wget rpm
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller & Backend Dependencies
+      - name: Install backend dependencies & PyInstaller
         run: |
           cd backend
           python3 -m venv .venv
@@ -114,119 +140,121 @@ jobs:
           .venv/bin/pip install -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
-      - name: Compile Backend with PyInstaller
+      - name: Build backend (Linux x86_64)
         run: |
           cd backend
           .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
 
-      - name: Fetch Dart Packages
+      - name: Flutter pub get
         run: |
           cd frontend
           flutter pub get
 
-      - name: Build Linux App
+      - name: Build Flutter Linux app
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev alien wget
-
           cd frontend
           flutter build linux --release
-          mkdir -p build/linux/x64/release/bundle/bin
-          cp -R ../backend/dist/kivo_backend build/linux/x64/release/bundle/bin/
 
-          # 1. Build .deb package
-          mkdir -p debian/DEBIAN
-          mkdir -p debian/usr/share/kivo-workspace
-          mkdir -p debian/usr/bin
-          cp -R build/linux/x64/release/bundle/* debian/usr/share/kivo-workspace/
-          echo '#!/bin/sh' > debian/usr/bin/kivo-workspace
-          echo 'exec /usr/share/kivo-workspace/kivo_workspace "$@"' >> debian/usr/bin/kivo-workspace
-          chmod +x debian/usr/bin/kivo-workspace
-          echo "Package: kivo-workspace" > debian/DEBIAN/control
-          echo "Version: 1.0.0" >> debian/DEBIAN/control
-          echo "Section: utils" >> debian/DEBIAN/control
-          echo "Priority: optional" >> debian/DEBIAN/control
-          echo "Architecture: amd64" >> debian/DEBIAN/control
-          echo "Maintainer: Kivo <support@kivo.com>" >> debian/DEBIAN/control
-          echo "Description: Edge-first AI Knowledge Workspace" >> debian/DEBIAN/control
-          dpkg-deb --build debian ../KivoWorkspace-Linux.deb
+      - name: Copy backend into Flutter release bundle
+        run: |
+          mkdir -p frontend/build/linux/x64/release/bundle/bin
+          cp -R backend/dist/kivo_backend frontend/build/linux/x64/release/bundle/bin/
 
-          # 2. Build .rpm package (using alien to convert deb to rpm)
-          sudo alien -r ../KivoWorkspace-Linux.deb
-          mv kivo-workspace-*.rpm ../KivoWorkspace-Linux.rpm || mv kivo-workspace_*.rpm ../KivoWorkspace-Linux.rpm || true
+      - name: Build .deb package
+        run: |
+          BUNDLE="frontend/build/linux/x64/release/bundle"
+          PKG="deb_staging"
+          mkdir -p "$PKG/DEBIAN"
+          mkdir -p "$PKG/usr/share/kivo-workspace"
+          mkdir -p "$PKG/usr/bin"
+          mkdir -p "$PKG/usr/share/applications"
+          mkdir -p "$PKG/usr/share/pixmaps"
+          cp -R "$BUNDLE/." "$PKG/usr/share/kivo-workspace/"
+          printf '#!/bin/sh\nexec /usr/share/kivo-workspace/kivo_workspace "$@"\n' \
+            > "$PKG/usr/bin/kivo-workspace"
+          chmod +x "$PKG/usr/bin/kivo-workspace"
+          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Kivo Workspace\nComment=Edge-first AI Knowledge Workspace\nExec=/usr/bin/kivo-workspace\nIcon=kivo-workspace\nCategories=Utility;\nTerminal=false\n' \
+            > "$PKG/usr/share/applications/kivo-workspace.desktop"
+          cp frontend/assets/images/app_logo.png "$PKG/usr/share/pixmaps/kivo-workspace.png"
+          printf 'Package: kivo-workspace\nVersion: 1.0.0\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Kivo <support@kivo.com>\nDescription: Edge-first AI Knowledge Workspace\n An intelligent workspace that runs entirely on-device.\n' \
+            > "$PKG/DEBIAN/control"
+          dpkg-deb --build "$PKG" KivoWorkspace-Linux.deb
 
-          # 3. Build .AppImage package
-          mkdir -p AppDir
-          cp -R build/linux/x64/release/bundle/* AppDir/
-          
-          cat << 'EOF' > AppDir/AppRun
-#!/bin/sh
-SELF=$(readlink -f "$0")
-HERE=$(dirname "$SELF")
-exec "$HERE/kivo_workspace" "$@"
-EOF
-          chmod +x AppDir/AppRun
+      - name: Build .rpm package (via alien)
+        run: |
+          sudo alien --to-rpm --scripts KivoWorkspace-Linux.deb
+          RPM_FILE=$(ls kivo-workspace*.rpm 2>/dev/null | head -1)
+          if [ -z "$RPM_FILE" ]; then
+            echo "ERROR: .rpm not found after alien conversion" && exit 1
+          fi
+          mv "$RPM_FILE" KivoWorkspace-Linux.rpm
 
-          cat << 'EOF' > AppDir/kivo-workspace.desktop
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Kivo Workspace
-Comment=Edge-first AI Knowledge Workspace
-Exec=AppRun
-Icon=kivo-workspace
-Categories=Utility;
-EOF
+      - name: Build .AppImage
+        run: |
+          BUNDLE="frontend/build/linux/x64/release/bundle"
+          APPDIR="AppDir"
+          mkdir -p "$APPDIR"
+          cp -R "$BUNDLE/." "$APPDIR/"
+          printf '#!/bin/sh\nSELF=$(readlink -f "$0")\nHERE=$(dirname "$SELF")\nexec "$HERE/kivo_workspace" "$@"\n' \
+            > "$APPDIR/AppRun"
+          chmod +x "$APPDIR/AppRun"
+          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Kivo Workspace\nComment=Edge-first AI Knowledge Workspace\nExec=AppRun\nIcon=kivo-workspace\nCategories=Utility;\nTerminal=false\n' \
+            > "$APPDIR/kivo-workspace.desktop"
+          cp frontend/assets/images/app_logo.png "$APPDIR/kivo-workspace.png"
+          wget -q \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run \
+            "$APPDIR" KivoWorkspace-Linux.AppImage
 
-          cp assets/images/app_logo.png AppDir/kivo-workspace.png
-
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O ../appimagetool
-          chmod +x ../appimagetool
-          ARCH=x86_64 ../appimagetool --appimage-extract-and-run AppDir ../KivoWorkspace-Linux.AppImage
-
-      - name: Publish Artifacts to GitHub Releases
-        uses: softprops/action-gh-release@v1
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
           files: |
             KivoWorkspace-Linux.deb
             KivoWorkspace-Linux.rpm
             KivoWorkspace-Linux.AppImage
-          fail_on_unmatched_files: false
-          draft: true
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # --- MAC OS INTEL BUILD JOB ---
+  # ============================================================
+  # JOB 3 · macOS Intel → KivoWorkspace-macOS-Intel.dmg
+  #   Runs on macos-14 (Silicon) but cross-compiles backend via
+  #   Rosetta 2 (arch -x86_64) so all native extensions are x86_64
+  # ============================================================
   build-macos-intel:
-    name: Build macOS Intel Release Package
+    name: macOS Intel DMG
     runs-on: macos-14
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-          flutter-version: '3.38.x'
+          channel: stable
+          flutter-version: '3.32.x'
 
-      - name: Enable Desktop Support
-        run: |
-          flutter config --enable-macos-desktop
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller & Backend Dependencies (Intel)
+      - name: Install backend dependencies & PyInstaller (Intel / x86_64 via Rosetta)
         run: |
           cd backend
           arch -x86_64 python3 -m venv .venv
@@ -234,78 +262,96 @@ EOF
           arch -x86_64 .venv/bin/pip install -r requirements_ci.txt
           arch -x86_64 .venv/bin/pip install pyinstaller
 
-      - name: Compile Backend with PyInstaller (Intel)
+      - name: Build backend with PyInstaller (Intel / x86_64)
         run: |
           cd backend
-          arch -x86_64 .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+          arch -x86_64 .venv/bin/pyinstaller \
+            --noconfirm --onedir --noconsole \
+            --name "kivo_backend" main.py
 
-      - name: Upload Intel Backend Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload Intel backend as Actions artifact
+        uses: actions/upload-artifact@v4
         with:
           name: macos-intel-backend
           path: backend/dist/kivo_backend/
+          retention-days: 1
 
-      - name: Fetch Dart Packages
+      - name: Flutter pub get
         run: |
           cd frontend
           flutter pub get
 
-      - name: Build macOS App & Intel DMG
+      - name: Build Flutter macOS app
         run: |
           cd frontend
           flutter build macos --release
-          mkdir -p "build/macos/Build/Products/Release/Kivo Workspace.app/Contents/Resources/bin"
-          cp -R ../backend/dist/kivo_backend "build/macos/Build/Products/Release/Kivo Workspace.app/Contents/Resources/bin/"
-          
-          mkdir -p build/macos/Build/Products/Release/dmg_staging
-          cp -R "build/macos/Build/Products/Release/Kivo Workspace.app" build/macos/Build/Products/Release/dmg_staging/
-          ln -s /Applications build/macos/Build/Products/Release/dmg_staging/Applications
 
-          hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
-            -volname "Kivo Workspace" ../KivoWorkspace-macOS-Intel.dmg
+      - name: Embed Intel backend into app bundle
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          mkdir -p "$APP/Contents/Resources/bin"
+          cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
 
-      - name: Publish Artifacts to GitHub Releases
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
+      - name: Create Intel DMG
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          STAGING="dmg_staging_intel"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -fs HFS+ \
+            -srcfolder "$STAGING" \
+            -volname "Kivo Workspace" \
+            -format UDZO \
             KivoWorkspace-macOS-Intel.dmg
-          fail_on_unmatched_files: false
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
           draft: true
           prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-macOS-Intel.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # --- MAC OS SILICON & UNIVERSAL BUILD JOB ---
+  # ============================================================
+  # JOB 4 · macOS Silicon & Universal
+  #   needs: build-macos-intel  (to download Intel backend artifact)
+  #   Produces: KivoWorkspace-macOS-Silicon.dmg
+  #             KivoWorkspace-macOS-Universal.dmg
+  # ============================================================
   build-macos-silicon:
-    name: Build macOS Silicon & Universal Release Packages
+    name: macOS Silicon & Universal DMGs
     runs-on: macos-14
     needs: build-macos-intel
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-          flutter-version: '3.38.x'
+          channel: stable
+          flutter-version: '3.32.x'
 
-      - name: Enable Desktop Support
-        run: |
-          flutter config --enable-macos-desktop
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller & Backend Dependencies (Silicon)
+      - name: Install backend dependencies & PyInstaller (Silicon / arm64)
         run: |
           cd backend
           python3 -m venv .venv
@@ -313,67 +359,87 @@ EOF
           .venv/bin/pip install -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
-      - name: Compile Backend with PyInstaller (Silicon)
+      - name: Build backend with PyInstaller (Silicon / arm64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+          .venv/bin/pyinstaller \
+            --noconfirm --onedir --noconsole \
+            --name "kivo_backend" main.py
 
-      - name: Fetch Dart Packages
+      - name: Flutter pub get
         run: |
           cd frontend
           flutter pub get
 
-      - name: Build macOS App & Silicon DMG
+      - name: Build Flutter macOS app
         run: |
           cd frontend
           flutter build macos --release
-          mkdir -p "build/macos/Build/Products/Release/Kivo Workspace.app/Contents/Resources/bin"
-          cp -R ../backend/dist/kivo_backend "build/macos/Build/Products/Release/Kivo Workspace.app/Contents/Resources/bin/"
-          
-          mkdir -p build/macos/Build/Products/Release/dmg_staging
-          cp -R "build/macos/Build/Products/Release/Kivo Workspace.app" build/macos/Build/Products/Release/dmg_staging/
-          ln -s /Applications build/macos/Build/Products/Release/dmg_staging/Applications
 
-          hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging \
-            -volname "Kivo Workspace" ../KivoWorkspace-macOS-Silicon.dmg
+      - name: Embed Silicon backend into app bundle
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          mkdir -p "$APP/Contents/Resources/bin"
+          cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
 
-      - name: Download Intel Backend Artifact
-        uses: actions/download-artifact@v3
+      - name: Create Silicon DMG
+        run: |
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          STAGING="dmg_staging_silicon"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -fs HFS+ \
+            -srcfolder "$STAGING" \
+            -volname "Kivo Workspace" \
+            -format UDZO \
+            KivoWorkspace-macOS-Silicon.dmg
+
+      - name: Download Intel backend artifact
+        uses: actions/download-artifact@v4
         with:
           name: macos-intel-backend
           path: backend/dist/kivo_backend_intel
 
-      - name: Create Universal macOS Backend
+      - name: Merge Silicon + Intel backends → Universal backend
         run: |
           python3 backend/scripts/merge_universal.py \
             backend/dist/kivo_backend \
             backend/dist/kivo_backend_intel \
             backend/dist/kivo_backend_universal
 
-      - name: Build Universal macOS App & DMG
+      - name: Build Universal app bundle
         run: |
-          cd frontend
-          mkdir -p build/macos/Build/Products/Release/dmg_staging_universal
-          cp -R "build/macos/Build/Products/Release/Kivo Workspace.app" build/macos/Build/Products/Release/dmg_staging_universal/
-          
-          # Replace backend inside Universal app bundle with the merged universal backend folder
-          rm -rf "build/macos/Build/Products/Release/dmg_staging_universal/Kivo Workspace.app/Contents/Resources/bin/kivo_backend"
-          cp -R ../backend/dist/kivo_backend_universal "build/macos/Build/Products/Release/dmg_staging_universal/Kivo Workspace.app/Contents/Resources/bin/kivo_backend"
-          
-          # Create symbolic link to /Applications
-          ln -s /Applications build/macos/Build/Products/Release/dmg_staging_universal/Applications
+          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
+          UNIV_APP="frontend/build/macos/Build/Products/Release/Kivo Workspace Universal.app"
+          cp -R "$APP" "$UNIV_APP"
+          rm -rf "$UNIV_APP/Contents/Resources/bin/kivo_backend"
+          cp -R backend/dist/kivo_backend_universal \
+                "$UNIV_APP/Contents/Resources/bin/kivo_backend"
 
-          hdiutil create -fs HFS+ -srcfolder build/macos/Build/Products/Release/dmg_staging_universal \
-            -volname "Kivo Workspace" ../KivoWorkspace-macOS-Universal.dmg
+      - name: Create Universal DMG
+        run: |
+          UNIV_APP="frontend/build/macos/Build/Products/Release/Kivo Workspace Universal.app"
+          STAGING="dmg_staging_universal"
+          mkdir -p "$STAGING"
+          cp -R "$UNIV_APP" "$STAGING/Kivo Workspace.app"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -fs HFS+ \
+            -srcfolder "$STAGING" \
+            -volname "Kivo Workspace" \
+            -format UDZO \
+            KivoWorkspace-macOS-Universal.dmg
 
-      - name: Publish Artifacts to GitHub Releases
-        uses: softprops/action-gh-release@v1
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
           files: |
             KivoWorkspace-macOS-Silicon.dmg
             KivoWorkspace-macOS-Universal.dmg
-          fail_on_unmatched_files: false
-          draft: true
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -54,3 +54,16 @@ tmp/
 backend/scratch/
 problem.txt
 problem*.txt
+
+# Others folder (custom user request)
+others/
+
+# Local build artifacts
+*.dmg
+AppIcon.icns
+
+# Additional dev files
+backend/.venv/
+backend/*.spec
+
+

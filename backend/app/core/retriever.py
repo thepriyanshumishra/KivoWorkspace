@@ -1,5 +1,8 @@
 # app/core/retriever.py
-import torch  # Prevent OpenMP/MKL conflict with faiss on macOS
+try:
+    import torch  # Prevent OpenMP/MKL conflict with faiss on macOS
+except ImportError:
+    pass
 import re
 import json
 import time
@@ -11,6 +14,7 @@ import faiss
 import requests
 import httpx
 import asyncio
+import multiprocessing
 
 from app.core.config import settings
 from app.core.processors.embeddings import get_embedding_model
@@ -503,7 +507,8 @@ async def retrieve_and_generate(
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": temperature if temperature is not None else 0.7
+                "temperature": temperature if temperature is not None else 0.7,
+                "num_thread": max(1, multiprocessing.cpu_count() // 2)
             }
         }
         
@@ -588,7 +593,8 @@ async def retrieve_and_generate(
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": temperature if temperature is not None else 0.0
+            "temperature": temperature if temperature is not None else 0.0,
+            "num_thread": max(1, multiprocessing.cpu_count() // 2)
         }
     }
 
@@ -671,7 +677,8 @@ async def retrieve_and_generate_stream(
             "prompt": prompt,
             "stream": True,
             "options": {
-                "temperature": temperature if temperature is not None else 0.7
+                "temperature": temperature if temperature is not None else 0.7,
+                "num_thread": max(1, multiprocessing.cpu_count() // 2)
             }
         }
 
@@ -724,7 +731,8 @@ async def retrieve_and_generate_stream(
         "prompt": prompt,
         "stream": True,
         "options": {
-            "temperature": temperature if temperature is not None else 0.0
+            "temperature": temperature if temperature is not None else 0.0,
+            "num_thread": max(1, multiprocessing.cpu_count() // 2)
         }
     }
 
@@ -1018,7 +1026,8 @@ async def retrieve_and_generate_universal(
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": temperature if temperature is not None else 0.7
+                "temperature": temperature if temperature is not None else 0.7,
+                "num_thread": max(1, multiprocessing.cpu_count() // 2)
             }
         }
 
@@ -1090,7 +1099,8 @@ async def retrieve_and_generate_universal(
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": temperature if temperature is not None else 0.0
+            "temperature": temperature if temperature is not None else 0.0,
+            "num_thread": max(1, multiprocessing.cpu_count() // 2)
         }
     }
 
@@ -1170,7 +1180,8 @@ async def retrieve_and_generate_universal_stream(
             "prompt": prompt,
             "stream": True,
             "options": {
-                "temperature": temperature if temperature is not None else 0.7
+                "temperature": temperature if temperature is not None else 0.7,
+                "num_thread": max(1, multiprocessing.cpu_count() // 2)
             }
         }
 
@@ -1220,7 +1231,8 @@ async def retrieve_and_generate_universal_stream(
         "prompt": prompt,
         "stream": True,
         "options": {
-            "temperature": temperature if temperature is not None else 0.0
+            "temperature": temperature if temperature is not None else 0.0,
+            "num_thread": max(1, multiprocessing.cpu_count() // 2)
         }
     }
 

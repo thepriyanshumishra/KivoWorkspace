@@ -6,7 +6,10 @@
 #   3. Normalizes vectors and builds a workspace-wide FAISS IndexFlatIP.
 #   4. Persists the index (index.faiss) and mapping file (chunk_map.json) to disk.
 
-import torch  # Prevent OpenMP/MKL conflict with faiss on macOS
+try:
+    import torch  # Prevent OpenMP/MKL conflict with faiss on macOS
+except ImportError:
+    pass
 import json
 import logging
 from pathlib import Path

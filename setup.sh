@@ -96,5 +96,9 @@ sleep 2
 # Launch Flutter frontend in the foreground
 echo "Launching Flutter app..."
 cd frontend
-flutter run
+TARGET_DEV="macos"
+if [ "$(uname)" = "Linux" ]; then
+    TARGET_DEV="linux"
+fi
+flutter run -d $TARGET_DEV
 cd ..

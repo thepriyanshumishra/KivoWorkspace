@@ -102,7 +102,6 @@ Download the latest release directly from the [Releases page](https://github.com
 
 | Platform | Binary Installer File | Format |
 |----------|----------------------|--------|
-| **macOS (Universal)** | `KivoWorkspace-macOS-Universal-1.1.0.dmg` | Merged drag-and-drop installer |
 | **macOS (Apple Silicon)** | `KivoWorkspace-macOS-Silicon-1.1.0.dmg` | Native arm64 drag-and-drop installer |
 | **macOS (Intel)** | `KivoWorkspace-macOS-Intel-1.1.0.dmg` | Native x86_64 drag-and-drop installer |
 | **Windows x64** | `KivoWorkspace-Windows-1.1.0.exe` | Standalone executable |

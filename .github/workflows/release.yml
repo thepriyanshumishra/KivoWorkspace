@@ -335,11 +335,10 @@ jobs:
         run: |
           cd backend
           .venv/bin/pyinstaller --noconfirm --onedir --noconsole \
-            --name "kivo_workspace" \
+            --name "Kivo Workspace" \
             --add-data "web:web" \
             --icon "../AppIcon.icns" \
             main.py
-          mv dist/kivo_workspace.app dist/Kivo\ Workspace.app
 
       - name: Re-sign app bundle (Ad-hoc)
         run: |
@@ -364,18 +363,6 @@ jobs:
           files: KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Zip Bundle (Preserving symlinks/permissions for Universal merge)
-        run: |
-          cd backend/dist
-          zip -q -r -y ../../macos_silicon_app.zip "Kivo Workspace.app"
-
-      - name: Upload Silicon App Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos_silicon_zip
-          path: macos_silicon_app.zip
-          retention-days: 1
 
   # ============================================================
   # JOB 4 · macOS Intel → Build & Upload DMG (x86_64 Self-Hosted)
@@ -411,9 +398,21 @@ jobs:
 
       - name: Install backend dependencies & PyInstaller
         run: |
+          if command -v python3.12 &>/dev/null; then
+            PYTHON_EXE="python3.12"
+          elif command -v python3.11 &>/dev/null; then
+            PYTHON_EXE="python3.11"
+          elif command -v python3.10 &>/dev/null; then
+            PYTHON_EXE="python3.10"
+          elif command -v python3 &>/dev/null; then
+            PYTHON_EXE="python3"
+          else
+            PYTHON_EXE="python"
+          fi
+          echo "Using Python: $PYTHON_EXE"
           cd backend
           rm -rf .venv
-          python3.12 -m venv .venv
+          $PYTHON_EXE -m venv .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install --prefer-binary -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
@@ -442,11 +441,10 @@ jobs:
         run: |
           cd backend
           .venv/bin/pyinstaller --noconfirm --onedir --noconsole \
-            --name "kivo_workspace" \
+            --name "Kivo Workspace" \
             --add-data "web:web" \
             --icon "../AppIcon.icns" \
             main.py
-          mv dist/kivo_workspace.app dist/Kivo\ Workspace.app
 
       - name: Re-sign app bundle (Ad-hoc)
         run: |
@@ -472,94 +470,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Zip Bundle (Preserving symlinks/permissions for Universal merge)
-        run: |
-          cd backend/dist
-          zip -q -r -y ../../macos_intel_app.zip "Kivo Workspace.app"
-
-      - name: Upload Intel App Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos_intel_zip
-          path: macos_intel_app.zip
-          retention-days: 1
-
-  # ============================================================
-  # JOB 5 · macOS Merge & Pack → Universal DMG
-  # ============================================================
-  pack-macos:
-    name: macOS Packaging & Universal Merge
-    runs-on: macos-14
-    needs: [build-macos-silicon, build-macos-intel]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Normalize Release Version
-        shell: bash
-        run: |
-          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
-          CLEAN_VER="${RAW_VER#v}"
-          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
-
-      - name: Download Silicon App Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: macos_silicon_zip
-
-      - name: Download Intel App Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: macos_intel_zip
-
-      - name: Unzip Apps
-        run: |
-          rm -rf silicon intel "Kivo Workspace.app"
-          unzip -q macos_silicon_zip/macos_silicon_app.zip -d silicon
-          unzip -q macos_intel_zip/macos_intel_app.zip -d intel
-
-      - name: Merge into Universal App Bundle
-        run: |
-          # Copy the Silicon app structure as a template
-          rm -rf "Kivo Workspace.app"
-          cp -R silicon/Kivo\ Workspace.app Kivo\ Workspace.app
-          
-          # Find all Mach-O files in Silicon app and merge with Intel counterpart
-          find "Kivo Workspace.app" -type f -print0 | while IFS= read -r -d '' file; do
-            rel_path="${file#Kivo Workspace.app/}"
-            intel_file="intel/Kivo Workspace.app/$rel_path"
-            if [ -f "$intel_file" ]; then
-              file_type=$(file -b "$file")
-              if [[ "$file_type" == *"Mach-O"* ]]; then
-                echo "Lipo merging: $rel_path"
-                mv "$file" "${file}.tmp"
-                lipo -create "${file}.tmp" "$intel_file" -output "$file" || (echo "Failed to lipo merge $rel_path, fallback to silicon version"; cp "${file}.tmp" "$file")
-                rm -f "${file}.tmp"
-              fi
-            fi
-          done
-
-      - name: Re-sign App Bundles (Ad-hoc)
-        run: |
-          codesign --force --deep --sign - "Kivo Workspace.app"
-
-      - name: Create DMG - macOS Universal
-        run: |
-          rm -rf staging_universal KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
-          mkdir -p staging_universal
-          cp -R Kivo\ Workspace.app staging_universal/Kivo\ Workspace.app
-          ln -s /Applications staging_universal/Applications
-          hdiutil create -fs HFS+ -srcfolder staging_universal -volname "Kivo Workspace" -format UDZO KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
-          rm -rf staging_universal
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ env.VERSION }}
-          draft: false
-          prerelease: false
-          fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

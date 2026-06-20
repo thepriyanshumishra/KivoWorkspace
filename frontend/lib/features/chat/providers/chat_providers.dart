@@ -163,7 +163,7 @@ class ChatNotifier extends StateNotifier<ChatState> {
             final citationsJson = data['citations'] as List<dynamic>? ?? [];
             final recQuestions = List<String>.from(data['recommended_questions'] as List<dynamic>? ?? []);
             final finalCitations = citationsJson.map((c) => Citation.fromJson(c)).toList();
-            final finalAnswer = data['answer'] as String? ?? assistantMessage.text;
+            final finalAnswer = data['answer'] as String? ?? (data['token'] as String?) ?? assistantMessage.text;
             final latencyMs = data['latency_ms'] as int? ?? 0;
             _ref.read(queryHistoryProvider.notifier).addRecord(_workspaceId, trimmedText, latencyMs);
 
@@ -351,7 +351,7 @@ class UniversalChatNotifier extends StateNotifier<ChatState> {
             final citationsJson = data['citations'] as List<dynamic>? ?? [];
             final recQuestions = List<String>.from(data['recommended_questions'] as List<dynamic>? ?? []);
             final finalCitations = citationsJson.map((c) => Citation.fromJson(c)).toList();
-            final finalAnswer = data['answer'] as String? ?? assistantMessage.text;
+            final finalAnswer = data['answer'] as String? ?? (data['token'] as String?) ?? assistantMessage.text;
             final latencyMs = data['latency_ms'] as int? ?? 0;
             _ref.read(queryHistoryProvider.notifier).addRecord('universal', trimmedText, latencyMs);
 

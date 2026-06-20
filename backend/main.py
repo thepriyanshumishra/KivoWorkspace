@@ -497,35 +497,58 @@ if __name__ == "__main__":
     if actual_port != args.port:
         logger.info(f"Port {args.port} was in use. Using port {actual_port} instead.")
 
-    # Automatically open the browser when packaged/run in production
+    # If packaged/run in production, open a native webview window
     if getattr(sys, "frozen", False):
-        def open_browser():
-            time.sleep(2.0)  # Give uvicorn a moment to bind and start
+        import webview
+
+        def start_server():
+            try:
+                uvicorn.run(app, host=args.host, port=actual_port, log_level="info")
+            except Exception as fatal:
+                logger.critical(f"Kivo Workspace server failed to start: {fatal}")
+                crash_log = Path.home() / "kivo_crash.log"
+                try:
+                    import traceback
+                    with open(crash_log, "w") as f:
+                        f.write("Kivo Workspace crashed on startup:\n")
+                        traceback.print_exc(file=f)
+                    logger.info(f"Crash log written to: {crash_log}")
+                except Exception:
+                    pass
+                sys.exit(1)
+
+        # Run uvicorn in a daemon thread so it runs in background
+        server_thread = threading.Thread(target=start_server, daemon=True)
+        server_thread.start()
+
+        # Let the main thread launch the pywebview window
+        logger.info(f"Launching native desktop window for Kivo Workspace on port {actual_port}...")
+        try:
+            window = webview.create_window(
+                "Kivo Workspace",
+                f"http://{args.host}:{actual_port}",
+                width=1280,
+                height=800,
+                min_size=(1024, 768)
+            )
+            webview.start()
+            logger.info("Native window closed. Exiting application.")
+            sys.exit(0)
+        except Exception as webview_err:
+            logger.error(f"Failed to start pywebview: {webview_err}. Falling back to default browser...")
             try:
                 webbrowser.open(f"http://{args.host}:{actual_port}")
             except Exception as e:
                 logger.error(f"Failed to open browser: {e}")
-
-        threading.Thread(target=open_browser, daemon=True).start()
-
-    logger.info(f"Starting Kivo Workspace server at http://{args.host}:{actual_port}")
-    try:
-        uvicorn.run(app, host=args.host, port=actual_port)
-    except Exception as fatal:
-        logger.critical(f"Kivo Workspace server failed to start: {fatal}")
-        # On macOS/Windows frozen builds, write crash info to a log file
-        # so the user can diagnose the problem.
-        if getattr(sys, "frozen", False):
-            crash_log = Path.home() / "kivo_crash.log"
-            try:
-                import traceback
-                with open(crash_log, "w") as f:
-                    f.write(f"Kivo Workspace crashed on startup:\n")
-                    traceback.print_exc(file=f)
-                logger.info(f"Crash log written to: {crash_log}")
-            except Exception:
-                pass
-        sys.exit(1)
+            # Keep main thread alive since uvicorn is in a daemon thread
+            server_thread.join()
+    else:
+        logger.info(f"Starting Kivo Workspace server in development mode at http://{args.host}:{actual_port}")
+        try:
+            uvicorn.run(app, host=args.host, port=actual_port)
+        except Exception as fatal:
+            logger.critical(f"Kivo Workspace server failed to start: {fatal}")
+            sys.exit(1)
 
 
 

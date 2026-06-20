@@ -2,20 +2,17 @@
 // Purpose: Manages reading and writing local settings configuration to a JSON file (~/.kivo_workspace_config.json).
 
 import 'dart:convert';
-import 'dart:io';
+import 'package:http/http.dart' as http;
+import '../../../core/constants/app_constants.dart';
 
 class OnboardingPrefs {
-  static Future<File> get _file async {
-    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
-    return File('$home/.kivo_workspace_config.json');
-  }
-
   static Future<Map<String, dynamic>> read() async {
     try {
-      final file = await _file;
-      if (await file.exists()) {
-        final content = await file.readAsString();
-        return json.decode(content) as Map<String, dynamic>;
+      final response = await http.get(
+        Uri.parse('${AppConstants.backendBaseUrl}/system/settings'),
+      );
+      if (response.statusCode == 200) {
+        return json.decode(utf8.decoder.convert(response.bodyBytes)) as Map<String, dynamic>;
       }
     } catch (_) {}
     return {};
@@ -23,10 +20,11 @@ class OnboardingPrefs {
 
   static Future<void> write(Map<String, dynamic> data) async {
     try {
-      final file = await _file;
-      final existing = await read();
-      existing.addAll(data);
-      await file.writeAsString(json.encode(existing));
+      await http.post(
+        Uri.parse('${AppConstants.backendBaseUrl}/system/settings'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(data),
+      );
     } catch (_) {}
   }
 

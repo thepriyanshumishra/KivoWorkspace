@@ -21,7 +21,7 @@ class WorkspaceUpdate(BaseModel):
     instructions: Optional[str] = Field(None, description="Custom workspace system instructions")
 
 class Workspace(WorkspaceBase):
-    id: str = Field(..., description="Unique workspace identifier")
+    id: str = Field(..., pattern=r"^[0-9a-f-]{36}$", description="Unique workspace identifier")
     created_at: datetime = Field(..., description="Timestamp when workspace was created")
     status: str = Field("ready", description="Status of workspace processing (ready, processing, failed)")
     sources_count: int = Field(0, description="Total number of sources added to the workspace")

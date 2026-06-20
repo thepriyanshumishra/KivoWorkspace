@@ -9,7 +9,7 @@ logger = logging.getLogger("kivo.universal_chat")
 router = APIRouter()
 
 @router.post("", response_model=ChatResponse)
-def query_universal(payload: UniversalChatRequest):
+async def query_universal(payload: UniversalChatRequest):
     """
     Query the universal RAG pipeline across multiple workspaces.
     Retrieves relevant parent chunks, ranks/merges, and generates a cited answer using Ollama.
@@ -19,7 +19,7 @@ def query_universal(payload: UniversalChatRequest):
         raise HTTPException(status_code=400, detail="At least one workspace ID must be provided in the search scope.")
     try:
         model_to_use = payload.model_name if payload.model_name else settings.ollama_default_model
-        res = retrieve_and_generate_universal(
+        res = await retrieve_and_generate_universal(
             workspace_ids=payload.workspace_ids,
             question=payload.message,
             model_name=model_to_use,
@@ -45,7 +45,7 @@ def query_universal(payload: UniversalChatRequest):
         raise HTTPException(status_code=500, detail="An internal error occurred while processing your query. Please try again.")
 
 @router.post("/stream")
-def query_universal_stream(payload: UniversalChatRequest):
+async def query_universal_stream(payload: UniversalChatRequest):
     """
     Query the universal RAG pipeline across multiple workspaces with streaming.
     Yields JSON Server-Sent Events (SSE) tokens and final citation metadata.

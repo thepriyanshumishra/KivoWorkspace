@@ -1,8 +1,5 @@
-# app/models/chat.py
-# Purpose: Pydantic schemas for RAG workspace query / chat.
-# Responsibilities: Defines validation models for chat requests and responses.
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+import re
 from typing import List, Optional
 
 class Citation(BaseModel):
@@ -34,3 +31,13 @@ class UniversalChatRequest(BaseModel):
     similarity_threshold: Optional[float] = Field(None, description="RAG similarity threshold override")
     ollama_url: Optional[str] = Field(None, description="Ollama API base URL override")
     model_name: Optional[str] = Field(None, description="Ollama LLM model override")
+
+    @field_validator("workspace_ids")
+    @classmethod
+    def validate_workspace_ids(cls, v):
+        uuid_regex = re.compile(r"^[0-9a-f-]{36}$")
+        for w_id in v:
+            if not uuid_regex.match(w_id):
+                raise ValueError(f"Invalid workspace ID format: {w_id}")
+        return v
+

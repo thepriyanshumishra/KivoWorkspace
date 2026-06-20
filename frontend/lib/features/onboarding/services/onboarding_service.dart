@@ -17,6 +17,27 @@ class OnboardingService {
 
   /// Retrieve system specifications dynamically via system commands.
   Future<Map<String, String>> checkSystemSpecs() async {
+    if (kIsWeb) {
+      try {
+        final response = await _client.get(
+          Uri.parse('${AppConstants.backendBaseUrl}/system/specs'),
+        );
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+          return data.map((key, value) => MapEntry(key, value.toString()));
+        }
+      } catch (e) {
+        debugPrint("Failed to fetch system specs: $e");
+      }
+      return {
+        'os': 'web',
+        'cores': 'unknown',
+        'arch': 'unknown',
+        'ram': 'unknown',
+        'disk': 'unknown',
+        'gpu': 'unknown',
+      };
+    }
     final Map<String, String> specs = {};
     specs['os'] = Platform.operatingSystem;
     specs['cores'] = Platform.numberOfProcessors.toString();
@@ -109,6 +130,54 @@ class OnboardingService {
 
   /// Check which local dependencies are already installed on the system.
   Future<Map<String, dynamic>> checkDependencies() async {
+    if (kIsWeb) {
+      final Map<String, dynamic> result = {
+        'ffmpeg': true,
+        'tesseract': true,
+        'python': true,
+        'embedding': true,
+        'ollamaModels': <String>[],
+        'ollamaRunning': false,
+        'ollamaInstalled': false,
+      };
+      try {
+        final tagsResponse = await _client.get(
+          Uri.parse('${AppConstants.backendBaseUrl}/system/ollama/tags'),
+        );
+        if (tagsResponse.statusCode == 200) {
+          final Map<String, dynamic> data = json.decode(utf8.decode(tagsResponse.bodyBytes));
+          if (data.containsKey('error')) {
+            result['ollamaRunning'] = false;
+          } else {
+            result['ollamaRunning'] = true;
+            result['ollamaInstalled'] = true;
+            final List<String> installed = [];
+            if (data.containsKey('models')) {
+              for (final model in data['models']) {
+                if (model.containsKey('name')) {
+                  installed.add(model['name'] as String);
+                }
+              }
+            }
+            result['ollamaModels'] = installed;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final diagResponse = await _client.get(
+          Uri.parse('${AppConstants.backendBaseUrl}/system/diagnostics'),
+        );
+        if (diagResponse.statusCode == 200) {
+          final Map<String, dynamic> data = json.decode(utf8.decode(diagResponse.bodyBytes));
+          result['ffmpeg'] = (data['ffmpeg']?['status'] == 'Ready');
+          result['tesseract'] = (data['tesseract']?['status'] == 'Online');
+          result['ollamaInstalled'] = result['ollamaInstalled'] || (data['ollama']?['status'] == 'Online');
+        }
+      } catch (_) {}
+
+      return result;
+    }
     final Map<String, dynamic> result = {};
     final isWindows = Platform.isWindows;
 
@@ -243,6 +312,14 @@ class OnboardingService {
 
   /// Check internet connectivity.
   Future<bool> checkInternetConnection() async {
+    if (kIsWeb) {
+      try {
+        final res = await _client.get(Uri.parse('https://api.github.com')).timeout(const Duration(seconds: 4));
+        return res.statusCode == 200;
+      } catch (_) {
+        return false;
+      }
+    }
     try {
       final res = await _client.get(Uri.parse('https://www.google.com')).timeout(const Duration(seconds: 4));
       return res.statusCode == 200;
@@ -291,6 +368,9 @@ class OnboardingService {
 
   /// Spawns the python backend subprocess with environment configuration.
   Future<Process?> spawnBackendProcess({required String defaultModel}) async {
+    if (kIsWeb) {
+      return null;
+    }
     if (_isSpawning) {
       debugPrint("Backend spawn already in progress. Skipping duplicate call.");
       return null;
@@ -415,6 +495,45 @@ class OnboardingService {
 
   /// Pulls a model via Ollama API and yields the pulling progress (0.0 to 1.0).
   Stream<double> pullOllamaModel(String modelId, {String? ollamaUrl}) async* {
+    if (kIsWeb) {
+      final client = http.Client();
+      try {
+        final url = '${AppConstants.backendBaseUrl}/system/ollama/pull';
+        final request = http.Request('POST', Uri.parse(url));
+        request.headers['Content-Type'] = 'application/json';
+        request.body = json.encode({'name': modelId});
+
+        final response = await client.send(request);
+        if (response.statusCode == 200) {
+          final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+          await for (final line in stream) {
+            if (line.trim().isEmpty) continue;
+            Map<String, dynamic>? data;
+            try {
+              data = json.decode(line);
+            } catch (_) {}
+
+            if (data != null) {
+              if (data.containsKey('error')) {
+                throw Exception(data['error']);
+              }
+              if (data.containsKey('completed') && data.containsKey('total')) {
+                final completed = data['completed'] as int;
+                final total = data['total'] as int;
+                if (total > 0) {
+                  yield completed / total;
+                }
+              }
+            }
+          }
+        } else {
+          throw Exception('Failed to pull model from Ollama: Status ${response.statusCode}');
+        }
+      } finally {
+        client.close();
+      }
+      return;
+    }
     final client = http.Client();
     try {
       final url = '${ollamaUrl ?? "http://localhost:11434"}/api/pull';
@@ -427,8 +546,15 @@ class OnboardingService {
         final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
         await for (final line in stream) {
           if (line.trim().isEmpty) continue;
+          Map<String, dynamic>? data;
           try {
-            final Map<String, dynamic> data = json.decode(line);
+            data = json.decode(line);
+          } catch (_) {}
+
+          if (data != null) {
+            if (data.containsKey('error')) {
+              throw Exception(data['error']);
+            }
             if (data.containsKey('completed') && data.containsKey('total')) {
               final completed = data['completed'] as int;
               final total = data['total'] as int;
@@ -436,7 +562,7 @@ class OnboardingService {
                 yield completed / total;
               }
             }
-          } catch (_) {}
+          }
         }
       } else {
         throw Exception('Failed to pull model from Ollama: Status ${response.statusCode}');
@@ -448,6 +574,18 @@ class OnboardingService {
 
   /// Deletes a model from local Ollama installation via API.
   Future<void> deleteOllamaModel(String modelId, {String? ollamaUrl}) async {
+    if (kIsWeb) {
+      final url = '${AppConstants.backendBaseUrl}/system/ollama/delete';
+      final request = http.Request('DELETE', Uri.parse(url));
+      request.headers['Content-Type'] = 'application/json';
+      request.body = json.encode({'name': modelId});
+      final streamedResponse = await _client.send(request);
+      final response = await http.Response.fromStream(streamedResponse);
+      if (response.statusCode != 200) {
+        throw Exception('Failed to delete model from Ollama: Status ${response.statusCode}');
+      }
+      return;
+    }
     final url = '${ollamaUrl ?? "http://localhost:11434"}/api/delete';
     final response = await _client.delete(
       Uri.parse(url),
@@ -461,6 +599,7 @@ class OnboardingService {
 
   /// Check if the ollama executable is present on the host system.
   bool lookupOllamaBinary() {
+    if (kIsWeb) return false;
     // 1. Try PATH resolution first
     try {
       final checkCmd = Platform.isWindows ? 'where' : 'which';
@@ -502,6 +641,9 @@ class OnboardingService {
 
   /// Downloads and installs Ollama using official scripts/commands.
   Future<bool> installOllama() async {
+    if (kIsWeb) {
+      return false;
+    }
     try {
       ProcessResult res;
       if (Platform.isWindows) {
@@ -528,6 +670,9 @@ class OnboardingService {
 
   /// Attempts to launch/start the Ollama service programmatically (headless, no GUI).
   Future<void> startOllamaService() async {
+    if (kIsWeb) {
+      return;
+    }
     try {
       if (Platform.isMacOS) {
         // Use 'ollama serve' directly — avoids opening the Ollama.app GUI window
@@ -610,6 +755,10 @@ class OnboardingService {
 
   /// Creates a local python virtual environment and installs the required AI libraries.
   Stream<double> installPythonDependencies() async* {
+    if (kIsWeb) {
+      yield 1.0;
+      return;
+    }
     final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
     final envDir = Directory(path.join(home, '.kivo_workspace', 'env'));
     

@@ -89,6 +89,7 @@ class TutorialKeys {
   static final logo = GlobalKey(debugLabel: 'logoKey');
   static final createWorkspace = GlobalKey(debugLabel: 'createWorkspaceKey');
   static final addSources = GlobalKey(debugLabel: 'addSourcesKey');
+  static final pdfSourceCard = GlobalKey(debugLabel: 'pdfSourceCardKey');
   static final chatInput = GlobalKey(debugLabel: 'chatInputKey');
   static final settingsBtn = GlobalKey(debugLabel: 'settingsBtnKey');
 }

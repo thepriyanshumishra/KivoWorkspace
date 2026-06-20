@@ -74,7 +74,7 @@ void main() {
   group('OnboardingProgress Model Tests', () {
     test('copyWith works correctly', () {
       final progress = OnboardingProgress();
-      expect(progress.activeStage, OnboardingStage.systemCheck);
+      expect(progress.activeStage, OnboardingStage.welcome);
       expect(progress.selectedModelIds, contains('qwen2.5:1.5b'));
 
       final updated = progress.copyWith(
@@ -96,8 +96,8 @@ void main() {
       notifier = OnboardingNotifier(service);
     });
 
-    test('Initial stage is systemCheck', () {
-      expect(notifier.state.activeStage, OnboardingStage.systemCheck);
+    test('Initial stage is welcome', () {
+      expect(notifier.state.activeStage, OnboardingStage.welcome);
     });
 
     test('Stage navigation works', () {

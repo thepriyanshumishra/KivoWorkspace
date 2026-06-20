@@ -77,7 +77,7 @@ def create_workspace(payload: WorkspaceCreate):
     return metadata
 
 @router.get("/{workspace_id}", response_model=Workspace)
-def get_workspace(workspace_id: str = Path(..., description="The unique workspace ID")):
+def get_workspace(workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID")):
     """Get metadata details of a specific workspace."""
     metadata_file = get_metadata_path(workspace_id)
     if not metadata_file.exists():
@@ -93,7 +93,7 @@ def get_workspace(workspace_id: str = Path(..., description="The unique workspac
 
 @router.put("/{workspace_id}", response_model=Workspace)
 def update_workspace(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     payload: WorkspaceUpdate = Body(...)
 ):
     """Update an existing workspace's metadata (rename name or update instructions)."""
@@ -121,7 +121,7 @@ def update_workspace(
         raise HTTPException(status_code=500, detail="Failed to update workspace metadata")
 
 @router.delete("/{workspace_id}")
-def delete_workspace(workspace_id: str = Path(..., description="The unique workspace ID")):
+def delete_workspace(workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID")):
     """Delete a workspace and all of its associated files."""
     workspace_dir = get_workspace_dir(workspace_id)
     if not workspace_dir.exists():
@@ -149,7 +149,7 @@ def delete_workspace(workspace_id: str = Path(..., description="The unique works
 
 
 @router.get("/{workspace_id}/stats")
-def get_workspace_stats(workspace_id: str = Path(..., description="The unique workspace ID")):
+def get_workspace_stats(workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID")):
     """Get statistics for the workspace (chunk count, embedding dimension, etc.)."""
     metadata_file = get_metadata_path(workspace_id)
     if not metadata_file.exists():

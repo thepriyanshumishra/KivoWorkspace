@@ -36,14 +36,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void initState() {
     super.initState();
     _focusNode.onKeyEvent = (node, event) {
-      if (event is KeyDownEvent) {
-        final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
-            event.logicalKey == LogicalKeyboardKey.numpadEnter;
-        final isShift = HardwareKeyboard.instance.isShiftPressed;
-        if (isEnter && !isShift) {
+      final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter;
+      final isShift = HardwareKeyboard.instance.isShiftPressed ||
+          HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+          HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+
+      if (isEnter && !isShift) {
+        if (event is KeyDownEvent) {
           _sendMessage();
-          return KeyEventResult.handled;
         }
+        return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
     };
@@ -241,18 +244,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        onPressed: chatState.isLoading ? null : _sendMessage,
-                        icon: chatState.isLoading
-                            ? SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
-                                ),
-                              )
+                        onPressed: chatState.isStreaming
+                            ? () {
+                                ref.read(chatProvider(widget.workspaceId).notifier).stopAddressing();
+                              }
+                            : _sendMessage,
+                        icon: chatState.isStreaming
+                            ? const Icon(Icons.stop_rounded, size: 16, color: Colors.white)
                             : const Icon(Icons.send_rounded),
                         color: colors.primary,
+                        style: IconButton.styleFrom(
+                          backgroundColor: chatState.isStreaming ? colors.statusFailed : Colors.transparent,
+                        ),
                       ),
                     ],
                   ),

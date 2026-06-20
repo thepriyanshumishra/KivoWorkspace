@@ -9,6 +9,8 @@ from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 import faiss
 import requests
+import httpx
+import asyncio
 
 from app.core.config import settings
 from app.core.processors.embeddings import get_embedding_model
@@ -84,6 +86,129 @@ Question:
 {question}
 
 Answer:"""
+
+def get_adaptive_system_prompts(model_name: str, is_strict: bool, is_meta_retrieval: bool = False) -> str:
+    """
+    Returns an optimized system prompt depending on the model's capabilities and size.
+    Prevents smaller or reasoning models from getting stuck or failing to format.
+    """
+    model_name_lower = model_name.lower()
+    
+    # 1. Identify model category
+    is_reasoning_model = "r1" in model_name_lower or "reasoning" in model_name_lower or "o1" in model_name_lower
+    is_small_model = any(kw in model_name_lower for kw in ["1.5b", "1b", "2b", "3b", "smollm", "tiny"])
+    is_default_qwen = "qwen2.5:1.5b" in model_name_lower or "qwen2.5" in model_name_lower
+    
+    if is_reasoning_model:
+        # Reasoning models output <think>...</think>. Keep prompt simple and direct.
+        # Too many constraints cause reasoning models to loop or fail reasoning.
+        if is_strict:
+            if is_meta_retrieval:
+                return """You are a grounded meta-retrieval assistant.
+Answer the user's question by aggregating references from the provided context chunks.
+Keep your answer factual and direct. You must cite the chunk ID of the context for every claim you make using the format [chunk_id] (e.g. [source_id_p0]).
+Do not invent facts. If the context does not contain the answer, politely refuse.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:"""
+            else:
+                return """You are a grounded QA assistant.
+Answer the user's question using the provided context chunks.
+Keep your explanation factual, clear, and direct. You must cite the chunk ID of the context for every claim you make using the format [chunk_id] (e.g. [source_id_p0]) at the end of the sentence or statement.
+If the context does not cover the topic, state that clearly.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:"""
+        else:
+            return """You are a helpful AI assistant. Answer the user's question using your pre-trained general knowledge.
+Do not mention or cite any document chunks or source files.
+Write your response in clean Markdown.
+
+Question:
+{question}
+
+Answer:"""
+
+    elif is_small_model and not is_default_qwen:
+        # Small non-Qwen models (e.g. Gemma 2B, Llama 3.2 3B, SmolLM2 1.7B)
+        # Avoid demanding tables, complex nesting, bolding, etc. to prevent overloading/stuck states.
+        if is_strict:
+            if is_meta_retrieval:
+                return """You are a grounded meta-retrieval assistant.
+Answer the user's question using the provided context chunks.
+Summarize the key information clearly. Cite the chunk ID of the context using the format [chunk_id] (e.g. [source_id_p0]) at the end of statements.
+If the context is empty, state that the topic is not covered.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:"""
+            else:
+                return """You are a grounded QA assistant.
+Answer the user's question using the provided context chunks as your source of facts.
+Explain the answer simply and directly. Do not make up facts.
+Cite the chunk ID using the format [chunk_id] (e.g. [source_id_p0]) for every factual claim.
+If the context does not contain the answer, state that the topic is not covered.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:"""
+        else:
+            return """You are a helpful AI assistant. Answer the user's question using your pre-trained knowledge.
+Keep your answer clear and concise. Do not cite document chunks.
+
+Question:
+{question}
+
+Answer:"""
+
+    else:
+        # Highly capable models (e.g. Qwen 2.5 1.5B/7B, Llama 3.1 8B, DeepSeek R1 8B/14B)
+        # We can use the full rich system prompts.
+        if is_strict:
+            if is_meta_retrieval:
+                return """You are a grounded meta-retrieval assistant. The user is asking for a comprehensive list or summary of references across the entire knowledge base.
+Analyze the provided context chunks, aggregate all relevant instances, and synthesize them.
+
+If the workspace system instructions specify a custom language (e.g. Hindi, French, Spanish, German, etc.) or formatting constraint, you MUST translate the facts from the context and write your entire response (including explanations and sentences) strictly in that requested language/format.
+
+Format your response using professional Markdown:
+1. Use bold text to highlight key concepts, terms, or actions.
+2. Use bulleted lists for unordered points, and numbered lists for sequences or steps. Use lettered sub-bullets (a, b, c) if nesting is required.
+3. Use tables when presenting comparative data, key-value pairs, or structured details.
+4. Use code blocks with the appropriate language tag (e.g. ```bash, ```python, etc.) for commands, code snippets, or configuration.
+5. Use italics for emphasis, definitions, or quotes.
+
+For every factual claim you make, you MUST cite the chunk ID of the context where the information was found using the format [chunk_id] (e.g. [source_id_p0]) at the end of the sentence or statement.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:"""
+            else:
+                return STRICT_QA_PROMPT
+        else:
+            return CREATIVE_QA_PROMPT
 
 def sanitize_response(
     answer: str,
@@ -167,6 +292,7 @@ def sanitize_response(
 def _prepare_rag_prompt(
     workspace_id: str,
     question: str,
+    model_name: str = "qwen2.5:1.5b",
     max_parent_tokens: int = 2000,
     is_strict: bool = True,
     similarity_threshold: Optional[float] = None
@@ -183,18 +309,13 @@ def _prepare_rag_prompt(
     routing_mode = "GLOBAL_SUMMARY" if is_global_summary else "STANDARD_QA"
     k = 3  # Optimized Top-K
     
-    if is_strict:
-        system_prompt = STRICT_QA_PROMPT
-    else:
-        system_prompt = CREATIVE_QA_PROMPT
-
+    is_meta_retrieval = False
     if not is_global_summary and INTENT_REGEX.search(question):
         routing_mode = "META_RETRIEVAL"
         k = 6
-        if is_strict:
-            system_prompt = STRICT_QA_PROMPT.replace("You are a grounded QA assistant.", "You are a grounded meta-retrieval assistant.")
-        else:
-            system_prompt = META_RETRIEVAL_PROMPT
+        is_meta_retrieval = True
+
+    system_prompt = get_adaptive_system_prompts(model_name, is_strict, is_meta_retrieval=is_meta_retrieval)
 
     logger.info(f"Question routed to {routing_mode} (Top-K={k}), is_strict={is_strict}")
 
@@ -341,7 +462,7 @@ def _prepare_rag_prompt(
     prompt = system_prompt.format(context=context_str, question=question)
     return prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg
 
-def retrieve_and_generate(
+async def retrieve_and_generate(
     workspace_id: str,
     question: str,
     model_name: str = "qwen2.5:1.5b",
@@ -352,7 +473,7 @@ def retrieve_and_generate(
     ollama_url: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Executes RAG and generates answer synchronously.
+    Executes RAG and generates answer asynchronously.
     """
     t_start = time.time()
     
@@ -388,12 +509,13 @@ def retrieve_and_generate(
         
         raw_answer = ""
         try:
-            response = requests.post(url, json=payload, timeout=180)
-            if response.status_code == 200:
-                result = response.json()
-                raw_answer = result.get("response", "").strip()
-            else:
-                raw_answer = f"Error: Ollama returned status code {response.status_code}"
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(url, json=payload)
+                if response.status_code == 200:
+                    result = response.json()
+                    raw_answer = result.get("response", "").strip()
+                else:
+                    raw_answer = f"Error: Ollama returned status code {response.status_code}"
         except Exception as e:
             raw_answer = f"Error calling Ollama API: {e}"
             
@@ -413,7 +535,7 @@ def retrieve_and_generate(
 
     try:
         prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg = _prepare_rag_prompt(
-            workspace_id, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            workspace_id, question, model_name=model_name, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
             similarity_threshold=similarity_threshold
         )
     except FileNotFoundError as fnf:
@@ -421,6 +543,20 @@ def retrieve_and_generate(
             "question": question,
             "answer": str(fnf),
             "plain_answer": str(fnf),
+            "citations": [],
+            "child_ids": [],
+            "parent_ids": [],
+            "retrieved_child_chunks": [],
+            "retrieved_parent_chunks": [],
+            "routing_mode": "ERROR",
+            "latency_ms": int((time.time() - t_start) * 1000)
+        }
+    except Exception as e:
+        logger.error(f"Error preparing prompt: {e}", exc_info=True)
+        return {
+            "question": question,
+            "answer": f"Error preparing prompt: {e}",
+            "plain_answer": f"Error preparing prompt: {e}",
             "citations": [],
             "child_ids": [],
             "parent_ids": [],
@@ -458,12 +594,13 @@ def retrieve_and_generate(
 
     raw_answer = ""
     try:
-        response = requests.post(url, json=payload, timeout=180)
-        if response.status_code == 200:
-            result = response.json()
-            raw_answer = result.get("response", "").strip()
-        else:
-            raw_answer = f"Error: Ollama returned status code {response.status_code}"
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(url, json=payload)
+            if response.status_code == 200:
+                result = response.json()
+                raw_answer = result.get("response", "").strip()
+            else:
+                raw_answer = f"Error: Ollama returned status code {response.status_code}"
     except Exception as e:
         raw_answer = f"Error calling Ollama API: {e}"
 
@@ -493,7 +630,7 @@ def retrieve_and_generate(
         "recommended_questions": []
     }
 
-def retrieve_and_generate_stream(
+async def retrieve_and_generate_stream(
     workspace_id: str,
     question: str,
     model_name: str = "qwen2.5:1.5b",
@@ -504,7 +641,7 @@ def retrieve_and_generate_stream(
     ollama_url: Optional[str] = None
 ):
     """
-    Executes RAG and yields Server-Sent Events (SSE) token chunks.
+    Executes RAG and yields Server-Sent Events (SSE) token chunks asynchronously.
     """
     t_start = time.time()
     
@@ -540,18 +677,17 @@ def retrieve_and_generate_stream(
 
         full_text_buffer = ""
         try:
-            response = requests.post(url, json=payload, stream=True, timeout=180)
-            if response.status_code != 200:
-                yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
-                return
-                
-            for line in response.iter_lines():
-                if line:
-                    data = json.loads(line.decode('utf-8'))
-                    token = data.get("response", "")
-                    yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
-                    full_text_buffer += token
-
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+                        return
+                    async for line in response.aiter_lines():
+                        if line:
+                            data = json.loads(line)
+                            token = data.get("response", "")
+                            yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                            full_text_buffer += token
         except Exception as e:
             yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
             return
@@ -562,7 +698,7 @@ def retrieve_and_generate_stream(
 
     try:
         prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg = _prepare_rag_prompt(
-            workspace_id, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            workspace_id, question, model_name=model_name, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
             similarity_threshold=similarity_threshold
         )
     except FileNotFoundError as fnf:
@@ -577,7 +713,7 @@ def retrieve_and_generate_stream(
         for i, w in enumerate(words):
             chunk = (w + " ") if i < len(words) - 1 else w
             yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
-            time.sleep(0.01)
+            await asyncio.sleep(0.01)
         yield f"data: {json.dumps({'done': True, 'answer': refusal_msg, 'plain_answer': refusal_msg, 'citations': [], 'recommended_questions': [], 'latency_ms': int((time.time() - t_start) * 1000)})}\n\n"
         return
 
@@ -594,18 +730,17 @@ def retrieve_and_generate_stream(
 
     full_text_buffer = ""
     try:
-        response = requests.post(url, json=payload, stream=True, timeout=180)
-        if response.status_code != 200:
-            yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
-            return
-            
-        for line in response.iter_lines():
-            if line:
-                data = json.loads(line.decode('utf-8'))
-                token = data.get("response", "")
-                yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
-                full_text_buffer += token
-
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            async with client.stream("POST", url, json=payload) as response:
+                if response.status_code != 200:
+                    yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+                    return
+                async for line in response.aiter_lines():
+                    if line:
+                        data = json.loads(line)
+                        token = data.get("response", "")
+                        yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                        full_text_buffer += token
     except Exception as e:
         yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
         return
@@ -628,6 +763,7 @@ def retrieve_and_generate_stream(
 def _prepare_universal_rag_prompt(
     workspace_ids: List[str],
     question: str,
+    model_name: str = "qwen2.5:1.5b",
     max_parent_tokens: int = 2000,
     is_strict: bool = True,
     similarity_threshold: Optional[float] = None
@@ -637,18 +773,13 @@ def _prepare_universal_rag_prompt(
     routing_mode = "GLOBAL_SUMMARY" if is_global_summary else "STANDARD_QA"
     k = 4  # Top-K child chunks per workspace to fetch
     
-    if is_strict:
-        system_prompt = STRICT_QA_PROMPT
-    else:
-        system_prompt = CREATIVE_QA_PROMPT
-
+    is_meta_retrieval = False
     if not is_global_summary and INTENT_REGEX.search(question):
         routing_mode = "META_RETRIEVAL"
         k = 8
-        if is_strict:
-            system_prompt = STRICT_QA_PROMPT.replace("You are a grounded QA assistant.", "You are a grounded meta-retrieval assistant.")
-        else:
-            system_prompt = META_RETRIEVAL_PROMPT
+        is_meta_retrieval = True
+
+    system_prompt = get_adaptive_system_prompts(model_name, is_strict, is_meta_retrieval=is_meta_retrieval)
 
     logger.info(f"Universal Question routed to {routing_mode} (per-workspace Top-K={k}), is_strict={is_strict}")
 
@@ -841,7 +972,7 @@ def _prepare_universal_rag_prompt(
     return prompt, routing_mode, all_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg, source_id_to_name
 
 
-def retrieve_and_generate_universal(
+async def retrieve_and_generate_universal(
     workspace_ids: List[str],
     question: str,
     model_name: str = "qwen2.5:1.5b",
@@ -852,7 +983,7 @@ def retrieve_and_generate_universal(
     ollama_url: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Executes RAG across multiple workspaces and generates answer synchronously.
+    Executes RAG across multiple workspaces and generates answer asynchronously.
     """
     t_start = time.time()
     
@@ -893,12 +1024,13 @@ def retrieve_and_generate_universal(
 
         raw_answer = ""
         try:
-            response = requests.post(url, json=payload, timeout=180)
-            if response.status_code == 200:
-                result = response.json()
-                raw_answer = result.get("response", "").strip()
-            else:
-                raw_answer = f"Error: Ollama returned status code {response.status_code}"
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                response = await client.post(url, json=payload)
+                if response.status_code == 200:
+                    result = response.json()
+                    raw_answer = result.get("response", "").strip()
+                else:
+                    raw_answer = f"Error: Ollama returned status code {response.status_code}"
         except Exception as e:
             raw_answer = f"Error calling Ollama API: {e}"
 
@@ -918,7 +1050,7 @@ def retrieve_and_generate_universal(
 
     try:
         prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg, source_id_to_name = _prepare_universal_rag_prompt(
-            workspace_ids, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            workspace_ids, question, model_name=model_name, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
             similarity_threshold=similarity_threshold
         )
     except Exception as e:
@@ -964,12 +1096,13 @@ def retrieve_and_generate_universal(
 
     raw_answer = ""
     try:
-        response = requests.post(url, json=payload, timeout=180)
-        if response.status_code == 200:
-            result = response.json()
-            raw_answer = result.get("response", "").strip()
-        else:
-            raw_answer = f"Error: Ollama returned status code {response.status_code}"
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(url, json=payload)
+            if response.status_code == 200:
+                result = response.json()
+                raw_answer = result.get("response", "").strip()
+            else:
+                raw_answer = f"Error: Ollama returned status code {response.status_code}"
     except Exception as e:
         raw_answer = f"Error calling Ollama API: {e}"
 
@@ -991,8 +1124,7 @@ def retrieve_and_generate_universal(
         "recommended_questions": []
     }
 
-
-def retrieve_and_generate_universal_stream(
+async def retrieve_and_generate_universal_stream(
     workspace_ids: List[str],
     question: str,
     model_name: str = "qwen2.5:1.5b",
@@ -1003,7 +1135,7 @@ def retrieve_and_generate_universal_stream(
     ollama_url: Optional[str] = None
 ):
     """
-    Executes universal RAG and yields Server-Sent Events (SSE) token chunks.
+    Executes universal RAG and yields Server-Sent Events (SSE) token chunks asynchronously.
     """
     t_start = time.time()
     
@@ -1044,18 +1176,17 @@ def retrieve_and_generate_universal_stream(
 
         full_text_buffer = ""
         try:
-            response = requests.post(url, json=payload, stream=True, timeout=180)
-            if response.status_code != 200:
-                yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
-                return
-                
-            for line in response.iter_lines():
-                if line:
-                    data = json.loads(line.decode('utf-8'))
-                    token = data.get("response", "")
-                    yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
-                    full_text_buffer += token
-
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+                        return
+                    async for line in response.aiter_lines():
+                        if line:
+                            data = json.loads(line)
+                            token = data.get("response", "")
+                            yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                            full_text_buffer += token
         except Exception as e:
             yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
             return
@@ -1066,7 +1197,7 @@ def retrieve_and_generate_universal_stream(
 
     try:
         prompt, routing_mode, retrieved_child_chunks, retrieved_parent_chunks, parent_ids_used, refusal_msg, source_id_to_name = _prepare_universal_rag_prompt(
-            workspace_ids, question, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
+            workspace_ids, question, model_name=model_name, max_parent_tokens=max_parent_tokens, is_strict=is_strict,
             similarity_threshold=similarity_threshold
         )
     except Exception as e:
@@ -1078,7 +1209,7 @@ def retrieve_and_generate_universal_stream(
         for i, w in enumerate(words):
             chunk = (w + " ") if i < len(words) - 1 else w
             yield f"data: {json.dumps({'token': chunk, 'done': False})}\n\n"
-            time.sleep(0.01)
+            await asyncio.sleep(0.01)
         yield f"data: {json.dumps({'done': True, 'answer': refusal_msg, 'plain_answer': refusal_msg, 'citations': [], 'recommended_questions': [], 'latency_ms': int((time.time() - t_start) * 1000)})}\n\n"
         return
 
@@ -1095,18 +1226,17 @@ def retrieve_and_generate_universal_stream(
 
     full_text_buffer = ""
     try:
-        response = requests.post(url, json=payload, stream=True, timeout=180)
-        if response.status_code != 200:
-            yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
-            return
-            
-        for line in response.iter_lines():
-            if line:
-                data = json.loads(line.decode('utf-8'))
-                token = data.get("response", "")
-                yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
-                full_text_buffer += token
-
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            async with client.stream("POST", url, json=payload) as response:
+                if response.status_code != 200:
+                    yield f"data: {json.dumps({'token': f'Error: Ollama returned status {response.status_code}', 'done': True, 'error': True})}\n\n"
+                    return
+                async for line in response.aiter_lines():
+                    if line:
+                        data = json.loads(line)
+                        token = data.get("response", "")
+                        yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+                        full_text_buffer += token
     except Exception as e:
         yield f"data: {json.dumps({'token': f'Error streaming from Ollama: {e}', 'done': True, 'error': True})}\n\n"
         return
@@ -1115,4 +1245,5 @@ def retrieve_and_generate_universal_stream(
     latency_ms = int((time.time() - t_start) * 1000)
 
     yield f"data: {json.dumps({'done': True, 'answer': answer_footnoted, 'plain_answer': answer_plain, 'citations': citations_meta, 'recommended_questions': [], 'latency_ms': latency_ms})}\n\n"
+
 

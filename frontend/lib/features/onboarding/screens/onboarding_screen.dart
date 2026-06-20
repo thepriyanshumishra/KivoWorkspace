@@ -1,5 +1,5 @@
 // features/onboarding/screens/onboarding_screen.dart
-// Purpose: Interactive 8-stage onboarding UI for system check, model selection, configurations, and styling.
+// Purpose: 6-stage onboarding UI — Welcome → Model Selection → Summary → Downloading → Customization → Done
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +29,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   // Model Selection sidebar state
   String _selectedCategory = 'Recommended';
+  bool _isCheckingSpecs = false;
 
   // Custom model state
   final TextEditingController _customModelController = TextEditingController();
@@ -46,6 +47,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedTheme = ref.read(themeModeProvider);
+    _selectedFont = ref.read(fontProvider);
+    _selectedAccent = ref.read(accentColorProvider);
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(onboardingProvider.notifier).refreshOllamaStatus();
+    });
   }
 
   @override
@@ -60,7 +68,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     final progress = ref.watch(onboardingProvider);
     final notifier = ref.read(onboardingProvider.notifier);
 
-    if (progress.activeStage == OnboardingStage.appearance) {
+    debugPrint('DEBUG: installedOllamaModels = ${progress.installedOllamaModels}');
+    debugPrint('DEBUG: selectedModelIds = ${progress.selectedModelIds}');
+
+
+    // Live-preview theme changes on customization and done screens
+    if (progress.activeStage == OnboardingStage.customization ||
+        progress.activeStage == OnboardingStage.done) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (ref.read(themeModeProvider) != _selectedTheme) {
           ref.read(themeModeProvider.notifier).state = _selectedTheme;
@@ -101,40 +115,30 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  // --- TIMELINE HEADER ---
+  // ─────────────────────────────────────────────────────────────
+  // TIMELINE HEADER
+  // ─────────────────────────────────────────────────────────────
   Widget _buildTimeline(OnboardingStage currentStage, AppColors colors) {
-    final stages = [
-      'System Check',
-      'Models',
-      'Summary',
-      'Download',
-      'Install',
-      'Config',
-      'Style',
-      'Done'
-    ];
+    final stages = ['Welcome', 'Models', 'Summary', 'Download', 'Customize', 'Done'];
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-      decoration: BoxDecoration(
-        color: colors.sidebarBackground,
-      ),
+      decoration: BoxDecoration(color: colors.sidebarBackground),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: List.generate(stages.length, (index) {
           final isCompleted = index < currentStage.index;
           final isActive = index == currentStage.index;
-          
+
           return Expanded(
             child: Row(
               children: [
-                // Circle Step Indicator
                 Container(
                   width: 24,
                   height: 24,
                   decoration: BoxDecoration(
                     color: isCompleted
-                        ? colors.statusReady
+                        ? colors.primary
                         : isActive
                             ? colors.primary
                             : colors.border,
@@ -153,7 +157,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                         ),
                 ),
                 const SizedBox(width: 8),
-                // Text Label (only shown on active/large screens)
                 Flexible(
                   child: Text(
                     stages[index],
@@ -171,7 +174,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Container(
                         height: 2,
-                        color: isCompleted ? colors.statusReady : colors.border,
+                        color: isCompleted ? colors.primary : colors.border,
                       ),
                     ),
                   ),
@@ -183,215 +186,134 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  // --- STAGE BODY MANAGER ---
+  // ─────────────────────────────────────────────────────────────
+  // STAGE ROUTER
+  // ─────────────────────────────────────────────────────────────
   Widget _buildStageContent(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
     switch (progress.activeStage) {
-      case OnboardingStage.systemCheck:
-        return _buildSystemCheck(progress, notifier, colors);
+      case OnboardingStage.welcome:
+        return _buildWelcome(notifier, colors);
       case OnboardingStage.modelSelection:
         return _buildModelSelection(progress, notifier, colors);
       case OnboardingStage.summary:
         return _buildSummary(progress, notifier, colors);
       case OnboardingStage.downloading:
         return _buildDownloading(progress, notifier, colors);
-      case OnboardingStage.installing:
-        return _buildInstalling(progress, notifier, colors);
-      case OnboardingStage.configurations:
-        return _buildConfigurations(progress, notifier, colors);
-      case OnboardingStage.appearance:
-        return _buildAppearance(progress, notifier, colors);
+      case OnboardingStage.customization:
+        return _buildCustomization(progress, notifier, colors);
       case OnboardingStage.done:
-        return _buildDone(progress, notifier, colors);
+        return _buildDone(colors);
     }
   }
 
-  // --- STAGE 1: SYSTEM CHECK ---
-  Widget _buildSystemCheck(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    final specs = progress.systemSpecs;
-    if (specs.isEmpty) {
-      return const CircularProgressIndicator();
-    }
-
+  // ─────────────────────────────────────────────────────────────
+  // STAGE 1: WELCOME
+  // ─────────────────────────────────────────────────────────────
+  Widget _buildWelcome(OnboardingNotifier notifier, AppColors colors) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const Text(
-          'System Diagnostics',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Kivo Workspace runs entirely locally. We will inspect your host machine configurations to optimize model compatibility.',
-          style: TextStyle(fontSize: 14, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 32),
 
-        // Spec Grid Layout
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          childAspectRatio: 4.5,
+        // Logo
+        Image.asset(
+          'assets/images/app_logo.png',
+          width: 80,
+          height: 80,
+          fit: BoxFit.contain,
+        ),
+        const SizedBox(height: 28),
+
+        const Text(
+          'Welcome to Kivo Workspace',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Your edge-first AI knowledge workspace.\nAll models run entirely on your device — private, fast, and offline-ready.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 15, color: colors.textSecondary, height: 1.55),
+        ),
+        const SizedBox(height: 40),
+
+        // Feature highlights
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _specCard('Operating System', specs['os'] ?? 'Unknown', Icons.computer, colors),
-            _specCard('Architecture', specs['arch'] ?? 'Unknown', Icons.architecture, colors),
-            _specCard('CPU Cores', '${specs['cores']} Cores', Icons.memory, colors),
-            _specCard('System RAM', specs['ram'] ?? 'Unknown', Icons.speed, colors),
-            _specCard('Available Storage', specs['disk'] ?? 'Unknown', Icons.storage, colors),
-            _specCard('Hardware Graphics', specs['gpu'] ?? 'Unknown', Icons.developer_board, colors),
+            _featureChip(Icons.lock_outline_rounded, 'Fully Private', colors),
+            const SizedBox(width: 12),
+            _featureChip(Icons.bolt_rounded, 'Edge-Optimized', colors),
+            const SizedBox(width: 12),
+            _featureChip(Icons.wifi_off_rounded, 'Works Offline', colors),
           ],
         ),
+        const SizedBox(height: 52),
 
-        const SizedBox(height: 20),
-
-        // --- Software Dependencies Section ---
-        const Text(
-          'Software Dependencies',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 10),
-        Container(
-          decoration: BoxDecoration(
-            color: colors.sidebarBackground,
-            border: Border.all(color: colors.border),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            children: [
-              _depRow('Ollama Engine', 'Required for running local LLMs', progress.isOllamaInstalled, colors, isRequired: true),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              _depRow('Embedding Model', 'ONNX quantized model for semantic search', progress.isEmbeddingModelInstalled, colors),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              _depRow('FFmpeg', 'Required for audio transcription', progress.isFfmpegInstalled, colors),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              _depRow('Tesseract OCR', 'Required for image-to-text extraction', progress.isTesseractInstalled, colors),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-              Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                  iconColor: colors.primary,
-                  collapsedIconColor: colors.textSecondary,
-                  tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                  title: Row(
+        SizedBox(
+          width: 240,
+          height: 52,
+          child: ElevatedButton(
+            onPressed: _isCheckingSpecs ? null : () async {
+              setState(() => _isCheckingSpecs = true);
+              await notifier.refreshOllamaStatus();
+              if (mounted) {
+                setState(() => _isCheckingSpecs = false);
+                notifier.nextStage();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              elevation: 0,
+            ),
+            child: _isCheckingSpecs 
+                ? const SizedBox(
+                    width: 20, 
+                    height: 20, 
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+                  )
+                : const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.more_horiz, size: 16, color: colors.textSecondary),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Others',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.textPrimary),
-                      ),
+                      Text('Get Started', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      SizedBox(width: 8),
+                      Icon(Icons.arrow_forward_rounded, size: 18),
                     ],
                   ),
-                  children: [
-                    Divider(height: 1, color: colors.border),
-                    _depRow('Python Runtime', 'Tokenizers, FAISS, ONNX-Runtime dependencies', progress.isPythonInstalled, colors),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
-
-        const SizedBox(height: 24),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () => notifier.runSystemChecks(),
-              icon: const Icon(Icons.refresh, size: 14),
-              label: const Text('Re-scan'),
-            ),
-            ElevatedButton(
-              onPressed: () => notifier.nextStage(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: colors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              ),
-              child: const Text('Next: Choose Models'),
-            ),
-          ],
-        ),
+        const SizedBox(height: 40),
       ],
     );
   }
 
-  Widget _depRow(String name, String description, bool isInstalled, AppColors colors, {bool isRequired = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Icon(
-            isInstalled ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 16,
-            color: isInstalled ? colors.statusReady : (isRequired ? colors.statusFailed : colors.textMuted),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: colors.textPrimary)),
-                Text(description, style: TextStyle(fontSize: 10.5, color: colors.textSecondary)),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: isInstalled ? colors.statusReadyBg : colors.sidebarBackground,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: isInstalled ? colors.statusReady : colors.border),
-            ),
-            child: Text(
-              isInstalled ? 'Installed' : 'Not Found',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.bold,
-                color: isInstalled ? colors.statusReady : colors.textMuted,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _specCard(String title, String value, IconData icon, AppColors colors) {
+  Widget _featureChip(IconData icon, String label, AppColors colors) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: colors.sidebarBackground,
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: colors.border),
-        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 28, color: colors.primary),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(title, style: TextStyle(fontSize: 11, color: colors.textMuted, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text(value, style: TextStyle(fontSize: 13, color: colors.textPrimary, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
+          Icon(icon, size: 14, color: colors.primary),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: colors.textPrimary)),
         ],
       ),
     );
   }
 
-  // --- STAGE 2: MODEL SELECTION ---
+  // ─────────────────────────────────────────────────────────────
+  // STAGE 2: MODEL SELECTION
+  // ─────────────────────────────────────────────────────────────
   Widget _buildModelSelection(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    // --- RAM-based recommendation logic ---
+    // RAM-based recommendation helpers (kept for smart defaults)
     int getRamBucket(int ramGb) {
       if (ramGb <= 4) return 4;
       if (ramGb <= 8) return 8;
@@ -402,37 +324,32 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     }
 
     List<int> getRecommendedRamBuckets(double systemRamGb) {
-      final List<int> ramLevels = [4, 8, 16, 24, 48, 96];
-      final lowerLevels = ramLevels.where((level) => level < systemRamGb).toList();
+      final ramLevels = [4, 8, 16, 24, 48, 96];
+      final lowerLevels = ramLevels.where((l) => l < systemRamGb).toList();
       if (lowerLevels.isEmpty) return [4];
       if (lowerLevels.length == 1) return [lowerLevels.first];
       return [lowerLevels[lowerLevels.length - 2], lowerLevels[lowerLevels.length - 1]];
     }
 
-    final ramString = progress.systemSpecs['ramValue'] ?? '8.0';
-    final systemRamGb = double.tryParse(ramString) ?? 8.0;
-    final hasGPU = progress.systemSpecs['gpuValue'] == 'true';
+    // Default to 8GB if system specs not fetched
+    const systemRamGb = 8.0;
     final allowedBuckets = getRecommendedRamBuckets(systemRamGb);
 
-    // Build recommended: 2 models from each of 3 key categories, matching system RAM
+    // Build recommended: 2 models from each of 3 key categories
     final targetCategories = ['General Chat & Assistant', 'Reasoning & Logic', 'Coding & Technical'];
     final List<CuratedModel> recommendedModels = [];
     final Set<String> recIds = {};
     for (final cat in targetCategories) {
       final catModels = curatedModelRegistry.where((m) => m.category == cat).toList();
-      // Primary: match RAM bucket
       final matching = catModels.where((m) {
         final bucket = getRamBucket(m.ramGb);
-        if (!allowedBuckets.contains(bucket)) return false;
-        if (m.compatibility.contains('High-end') && !hasGPU) return false;
-        return true;
+        return allowedBuckets.contains(bucket);
       }).toList();
       int count = 0;
       for (final m in matching) {
         if (count >= 2) break;
         if (!recIds.contains(m.id)) { recommendedModels.add(m); recIds.add(m.id); count++; }
       }
-      // Fallback: use any from category
       if (count < 2) {
         for (final m in catModels) {
           if (count >= 2) break;
@@ -441,23 +358,76 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       }
     }
 
-    // Build category list with proper order
+    // Build installed models list dynamically from local Ollama tags
+    final List<CuratedModel> installedModels = [];
+    for (final tag in progress.installedOllamaModels) {
+      final match = curatedModelRegistry.firstWhere(
+        (m) => m.id == tag,
+        orElse: () => curatedModelRegistry.firstWhere(
+          (m) => m.id.split(':').first == tag.split(':').first,
+          orElse: () {
+            String cleanName = tag;
+            if (cleanName.endsWith(':latest')) {
+              cleanName = cleanName.replaceAll(':latest', '');
+            }
+            return CuratedModel(
+              id: tag,
+              name: cleanName,
+              category: 'Installed',
+              capability: 'Local Model',
+              size: 'Installed',
+              sizeGb: 0.0,
+              ram: 'Unknown',
+              ramGb: 0,
+              compatibility: 'All devices',
+              description: 'Installed local model detected from Ollama.',
+            );
+          },
+        ),
+      );
+      if (!installedModels.any((m) => m.id == match.id)) {
+        installedModels.add(match);
+      }
+    }
+
+    // Reset tab if installed tab is empty (due to deletion)
+    if (_selectedCategory == 'Installed' && installedModels.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() {
+          _selectedCategory = 'Recommended';
+        });
+      });
+    }
+
+    // Build ordered category list
     final allCatSet = curatedModelRegistry.map((m) => m.category).toSet();
     final categoryOrder = [
-      'Recommended', 'General Chat & Assistant', 'Reasoning & Logic', 'Coding & Technical',
+      'Installed', 'Recommended', 'General Chat & Assistant', 'Reasoning & Logic', 'Coding & Technical',
       'Creative & Narrative', 'Educational & Information', 'Summarization', 'High-Capacity Reasoners',
       'Agentic & Tool-Use', 'Roleplay & Storytelling', 'Speed & Low-Resource',
       'Medical & Science', 'Multilingual & Translation', 'Uncensored', 'Custom',
     ];
-    final categories = ['Recommended', ...allCatSet];
+    final categories = [
+      if (progress.installedOllamaModels.isNotEmpty) 'Installed',
+      'Recommended',
+      ...allCatSet
+    ];
+    debugPrint('DEBUG: categories constructed = $categories');
     categories.sort((a, b) {
       final ia = categoryOrder.indexOf(a); final ib = categoryOrder.indexOf(b);
       return (ia == -1 ? 99 : ia).compareTo(ib == -1 ? 99 : ib);
     });
+    debugPrint('DEBUG: categories sorted = $categories');
 
-    final List<CuratedModel> currentModels = _selectedCategory == 'Recommended'
-        ? recommendedModels
-        : curatedModelRegistry.where((m) => m.category == _selectedCategory).toList();
+
+    final List<CuratedModel> currentModels;
+    if (_selectedCategory == 'Installed') {
+      currentModels = installedModels;
+    } else if (_selectedCategory == 'Recommended') {
+      currentModels = recommendedModels;
+    } else {
+      currentModels = curatedModelRegistry.where((m) => m.category == _selectedCategory).toList();
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -473,11 +443,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
         ),
         const SizedBox(height: 24),
 
-        // Split-pane layout: sidebar + content
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Left Category Sidebar (220 wide)
+            // Left Category Sidebar
             SizedBox(
               width: 210,
               child: Column(
@@ -525,14 +494,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                             if (selCount > 0)
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: colors.primary,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  '$selCount',
-                                  style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
-                                ),
+                                decoration: BoxDecoration(color: colors.primary, borderRadius: BorderRadius.circular(10)),
+                                child: Text('$selCount', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
                               ),
                           ],
                         ),
@@ -552,7 +515,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _selectedCategory == 'Recommended' ? '⭐ Recommended for Your System' : _selectedCategory,
+                    _selectedCategory == 'Recommended' ? '⭐ Recommended' : _selectedCategory,
                     style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
@@ -574,7 +537,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                         mainAxisSpacing: 10,
                         childAspectRatio: 2.1,
                       ),
-                      itemBuilder: (context, idx) => _buildCompactModelCard(currentModels[idx], progress, notifier, colors),
+                      itemBuilder: (context, idx) {
+                        if (_selectedCategory == 'Installed') {
+                          return _buildInstalledModelCard(currentModels[idx], progress, notifier, colors);
+                        }
+                        return _buildCompactModelCard(currentModels[idx], progress, notifier, colors);
+                      },
                     ),
                 ],
               ),
@@ -597,7 +565,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
               ),
-              child: const Text('Next: Installation Summary'),
+              child: const Text('Next: Review Summary'),
             ),
           ],
         ),
@@ -605,7 +573,873 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  // --- Custom Model Panel ---
+  // ─────────────────────────────────────────────────────────────
+  // STAGE 3: SUMMARY (models only)
+  // ─────────────────────────────────────────────────────────────
+  Widget _buildSummary(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
+    final downloadSize = notifier.getCalculatedDownloadSize();
+    final diskFootprint = downloadSize * 1.05; // ~5% overhead for Ollama blobs
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Download Summary',
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Review the models selected for download. Everything runs locally on your device.',
+          style: TextStyle(fontSize: 14, color: colors.textSecondary),
+        ),
+        const SizedBox(height: 24),
+
+        // Models list
+        Container(
+          decoration: BoxDecoration(
+            color: colors.sidebarBackground,
+            border: Border.all(color: colors.border),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            children: [
+              // Section header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.psychology_rounded, size: 16, color: colors.primary),
+                    const SizedBox(width: 8),
+                    Text('AI Models to Download', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: colors.textPrimary)),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(color: colors.primarySubtle, borderRadius: BorderRadius.circular(6)),
+                      child: Text(
+                        '${progress.selectedModelIds.length} selected',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.primary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              ...progress.selectedModelIds.map((id) {
+                final match = curatedModelRegistry.firstWhere(
+                  (m) => m.id == id,
+                  orElse: () => curatedModelRegistry[0],
+                );
+                final isAlreadyInstalled = progress.installedOllamaModels.any(
+                  (m) => m == id || m.startsWith('$id:') || id.startsWith('$m:'),
+                );
+                return _summaryModelTile(match, isAlreadyInstalled, colors);
+              }),
+
+              // Ollama row
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(
+                  progress.isOllamaInstalled ? Icons.check_circle : Icons.terminal_rounded, 
+                  size: 16, 
+                  color: progress.isOllamaInstalled ? colors.statusReady : colors.primary,
+                ),
+                title: const Text('Ollama Engine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                subtitle: Text(
+                  progress.isOllamaInstalled ? 'Already installed on your device' : 'Required to run local LLMs', 
+                  style: TextStyle(fontSize: 11, color: colors.textSecondary),
+                ),
+                trailing: Text(
+                  progress.isOllamaInstalled ? 'Installed' : '~300 MB', 
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600, 
+                    fontSize: 12.5, 
+                    color: progress.isOllamaInstalled ? colors.statusReady : colors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Disk info banner
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: colors.primarySubtle,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.primary.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.storage_rounded, size: 18, color: colors.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Total download: ${_formatDownloadSize(downloadSize)}  ·  Disk footprint: ~${_formatDownloadSize(diskFootprint)}',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.primary),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 40),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            OutlinedButton(
+              onPressed: () => notifier.prevStage(),
+              child: const Text('Back'),
+            ),
+            ElevatedButton(
+              onPressed: () => notifier.nextStage(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: colors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              ),
+              child: const Text('Start Downloading'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _summaryModelTile(CuratedModel model, bool isInstalled, AppColors colors) {
+    return ListTile(
+      leading: Icon(
+        isInstalled ? Icons.check_circle : Icons.download_rounded,
+        size: 16,
+        color: isInstalled ? colors.statusReady : colors.primary,
+      ),
+      title: Text(model.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+      subtitle: Text(
+        isInstalled ? 'Already installed — will be skipped' : model.description,
+        style: TextStyle(fontSize: 11, color: colors.textSecondary),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Text(
+        isInstalled ? 'Installed' : model.size,
+        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: isInstalled ? colors.statusReady : colors.textPrimary),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // STAGE 4: DOWNLOADING
+  // ─────────────────────────────────────────────────────────────
+  Widget _buildDownloading(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
+    final isDone = progress.downloadProgress >= 1.0;
+    final isDownloading = progress.isDownloading && !progress.downloadCancelled;
+    
+    final currentModelEntry = progress.installStatus.entries
+        .where((e) => e.value.contains('Downloading'))
+        .firstOrNull;
+    final currentModelId = currentModelEntry?.key;
+    final currentModel = currentModelId != null
+        ? curatedModelRegistry.firstWhere((m) => m.id == currentModelId, orElse: () => curatedModelRegistry[0])
+        : null;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 32),
+
+        Text(
+          isDone ? 'Download Complete!' : (progress.downloadCancelled ? 'Download Paused' : 'Downloading Models'),
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          isDone
+              ? 'All selected models are ready. Let\'s personalize your workspace.'
+              : (progress.downloadCancelled 
+                  ? 'The download has been paused/cancelled. You can resume or proceed.'
+                  : 'Please keep the app open. Models are being pulled from Ollama.'),
+          style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
+        ),
+        const SizedBox(height: 36),
+
+        // Currently downloading model indicator
+        if (!isDone && currentModel != null && isDownloading) ...[
+          Row(
+            children: [
+              Container(
+                width: 8, height: 8,
+                decoration: BoxDecoration(color: colors.primary, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Pulling: ${currentModel.name}',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: colors.primary),
+              ),
+              const SizedBox(width: 8),
+              Text(currentModel.size, style: TextStyle(fontSize: 12, color: colors.textSecondary)),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // Speed & ETA row
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.speed_rounded, size: 14, color: colors.textSecondary),
+                const SizedBox(width: 5),
+                Text(
+                  isDone 
+                      ? 'Done' 
+                      : (isDownloading ? '${progress.downloadSpeed.toStringAsFixed(1)} MB/s' : '0.0 MB/s'),
+                  style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Icon(Icons.timer_outlined, size: 14, color: colors.textSecondary),
+                const SizedBox(width: 5),
+                Text(
+                  isDone 
+                      ? '0s remaining' 
+                      : (isDownloading ? '${progress.downloadEta} remaining' : 'Paused'),
+                  style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Progress bar
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: isDone ? 1.0 : progress.downloadProgress,
+            minHeight: 14,
+            backgroundColor: colors.border,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              isDone 
+                ? colors.statusReady 
+                : (isDownloading ? colors.primary : colors.textMuted)
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              '${progress.downloadedMb.toStringAsFixed(0)} MB / ${progress.totalMb.toStringAsFixed(0)} MB',
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: colors.textPrimary),
+            ),
+          ],
+        ),
+
+        // Per-model status list
+        if (progress.installStatus.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colors.sidebarBackground,
+              border: Border.all(color: colors.border),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: progress.installStatus.entries.map((entry) {
+                final isModelDone = entry.value.contains('Ready') || entry.value.contains('✅') || entry.value.contains('Installed');
+                final isInProgress = entry.value.contains('Downloading') && isDownloading;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      if (isInProgress)
+                        SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: colors.primary),
+                        )
+                      else
+                        Icon(
+                          isModelDone ? Icons.check_circle : Icons.radio_button_unchecked,
+                          size: 14,
+                          color: isModelDone ? colors.statusReady : colors.textMuted,
+                        ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          entry.key,
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        isInProgress ? entry.value : (isModelDone ? 'Installed ✅' : 'Paused'),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: isInProgress ? colors.primary : isModelDone ? colors.statusReady : colors.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+
+        // Cancel / Retry Circular Button block
+        if (!isDone) ...[
+          const SizedBox(height: 28),
+          if (isDownloading)
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        backgroundColor: colors.sidebarBackground,
+                        title: Text(
+                          'Cancel Download?',
+                          style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.bold),
+                        ),
+                        content: Text(
+                          'Are you sure you want to stop downloading? You can resume later, go back to change models, or skip to the next step.',
+                          style: TextStyle(color: colors.textSecondary),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: Text('Keep Downloading', style: TextStyle(color: colors.primary)),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              notifier.cancelDownload();
+                            },
+                            child: const Text('Cancel Download', style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+                icon: const Icon(Icons.cancel_outlined, size: 16),
+                label: const Text('Cancel Download', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            )
+          else
+            Center(
+              child: Column(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.refresh_rounded, size: 48, color: colors.primary),
+                    onPressed: () => notifier.startDownloading(),
+                    tooltip: 'Resume/Retry Download',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    progress.downloadCancelled 
+                      ? 'Download paused. Click to resume.' 
+                      : 'Download failed/paused. Click to retry.',
+                    style: TextStyle(fontSize: 12.5, color: colors.textSecondary, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+        ],
+
+        // No internet banner
+        if (!progress.isInternetConnected)
+          Container(
+            margin: const EdgeInsets.only(top: 24),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.statusFailedBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: colors.statusFailed),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_off_rounded, color: colors.statusFailed),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('No Internet Connection', style: TextStyle(fontWeight: FontWeight.bold, color: colors.statusFailed, fontSize: 13.5)),
+                      const SizedBox(height: 2),
+                      Text('Please check your network and retry.', style: TextStyle(color: colors.statusFailed, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () => notifier.retryDownload(),
+                  style: ElevatedButton.styleFrom(backgroundColor: colors.statusFailed, foregroundColor: Colors.white),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+
+        // General error banner
+        if (progress.errorMessage != null && !progress.downloadCancelled)
+          Container(
+            margin: const EdgeInsets.only(top: 24),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colors.statusFailedBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: colors.statusFailed),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: colors.statusFailed),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Download Failed', style: TextStyle(fontWeight: FontWeight.bold, color: colors.statusFailed, fontSize: 13.5)),
+                      const SizedBox(height: 2),
+                      Text(progress.errorMessage!, style: TextStyle(color: colors.statusFailed, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () => notifier.startDownloading(),
+                  style: ElevatedButton.styleFrom(backgroundColor: colors.statusFailed, foregroundColor: Colors.white),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+
+        // Bottom Back/Next navigation buttons (only show when not actively downloading)
+        if (!isDownloading) ...[
+          const SizedBox(height: 36),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              OutlinedButton(
+                onPressed: () => notifier.prevStage(),
+                child: const Text('Back'),
+              ),
+              ElevatedButton(
+                onPressed: () => notifier.nextStage(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                ),
+                child: const Text('Next: Customize'),
+              ),
+            ],
+          ),
+        ],
+
+        const SizedBox(height: 60),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // STAGE 5: CUSTOMIZATION (merged Config + Appearance)
+  // ─────────────────────────────────────────────────────────────
+  Widget _buildCustomization(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
+    final isDark = _selectedTheme == ThemeMode.dark;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Personalize Your Workspace',
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Configure your theme, typography, and accent color. You can change these anytime in Settings.',
+          style: TextStyle(fontSize: 14, color: colors.textSecondary),
+        ),
+        const SizedBox(height: 32),
+
+        // 1. Theme selection
+        const Text('Theme Mode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _outlinedButtonIcon(
+              onPressed: () {
+                setState(() => _selectedTheme = ThemeMode.light);
+                ref.read(themeModeProvider.notifier).state = ThemeMode.light;
+              },
+              icon: Icons.light_mode_outlined,
+              label: 'Light Mode',
+              isSelected: _selectedTheme == ThemeMode.light,
+              colors: colors,
+            ),
+            const SizedBox(width: 16),
+            _outlinedButtonIcon(
+              onPressed: () {
+                setState(() => _selectedTheme = ThemeMode.dark);
+                ref.read(themeModeProvider.notifier).state = ThemeMode.dark;
+              },
+              icon: Icons.dark_mode_outlined,
+              label: 'Dark Mode',
+              isSelected: _selectedTheme == ThemeMode.dark,
+              colors: colors,
+            ),
+          ],
+        ),
+        const SizedBox(height: 28),
+
+        // 2. Typography
+        const Text('Active Typography', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 12),
+        SegmentedButton<AppFontFamily>(
+          segments: const [
+            ButtonSegment(value: AppFontFamily.sans, label: Text('Sans Serif')),
+            ButtonSegment(value: AppFontFamily.serif, label: Text('Serif')),
+            ButtonSegment(value: AppFontFamily.mono, label: Text('Mono (Stealth)')),
+          ],
+          selected: {_selectedFont},
+          onSelectionChanged: (val) {
+            setState(() => _selectedFont = val.first);
+            ref.read(fontProvider.notifier).state = val.first;
+          },
+          style: ButtonStyle(
+            shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))),
+          ),
+        ),
+        const SizedBox(height: 28),
+
+        // 3. Accent highlight
+        const Text('Accent Highlight Color', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            ..._accentColors.map((color) {
+              final isSelected = _selectedAccent == color;
+              return GestureDetector(
+                onTap: () {
+                  setState(() => _selectedAccent = color);
+                  ref.read(accentColorProvider.notifier).state = color;
+                },
+                child: Container(
+                  margin: const EdgeInsets.only(right: 16),
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: isSelected
+                        ? Border.all(color: isDark ? Colors.white : Colors.black, width: 2.5)
+                        : Border.all(color: Colors.transparent),
+                  ),
+                ),
+              );
+            }),
+            // Custom palette picker
+            GestureDetector(
+              onTap: () => _showCustomColorPickerDialog(context, colors),
+              child: Tooltip(
+                message: 'Custom Color Palette',
+                child: Container(
+                  margin: const EdgeInsets.only(right: 16),
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: !_accentColors.contains(_selectedAccent)
+                          ? (isDark ? Colors.white : Colors.black)
+                          : colors.border,
+                      width: !_accentColors.contains(_selectedAccent) ? 2.5 : 1,
+                    ),
+                    gradient: const SweepGradient(
+                      colors: [Colors.red, Colors.yellow, Colors.green, Colors.cyan, Colors.blue, Color(0xFFFF00FF), Colors.red],
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.palette_rounded,
+                    size: 16,
+                    color: !_accentColors.contains(_selectedAccent)
+                        ? (isDark ? Colors.white : Colors.black)
+                        : Colors.white.withValues(alpha: 0.8),
+                  ),
+                ),
+              ),
+            ),
+            // Eyedropper
+            GestureDetector(
+              onTap: () async {
+                final Color? picked = await EyedropperHelper.pickColor(context);
+                if (picked != null) {
+                  setState(() => _selectedAccent = picked);
+                  ref.read(accentColorProvider.notifier).state = picked;
+                }
+              },
+              child: Tooltip(
+                message: 'Pick Color from Screen',
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: colors.border),
+                    color: colors.sidebarBackground,
+                  ),
+                  child: Icon(Icons.colorize_rounded, size: 16, color: colors.textPrimary),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 48),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            OutlinedButton(
+              onPressed: () {
+                setState(() {
+                  _selectedTheme = ThemeMode.dark;
+                  _selectedFont = AppFontFamily.sans;
+                  _selectedAccent = const Color(0xFF0075DE);
+                });
+                ref.read(themeModeProvider.notifier).state = ThemeMode.dark;
+                ref.read(fontProvider.notifier).state = AppFontFamily.sans;
+                ref.read(accentColorProvider.notifier).state = const Color(0xFF0075DE);
+              },
+              child: const Text('Restore Defaults'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                notifier.completeOnboarding(
+                  theme: _selectedTheme,
+                  font: _selectedFont.name,
+                  accentHex: '#${_selectedAccent.toARGB32().toRadixString(16).substring(2)}',
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: colors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+              ),
+              child: const Text('Finish Setup'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _outlinedButtonIcon({
+    required VoidCallback onPressed,
+    required IconData icon,
+    required String label,
+    required bool isSelected,
+    required AppColors colors,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16, color: isSelected ? colors.primary : colors.textSecondary),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: isSelected ? colors.primary : colors.textSecondary,
+        side: BorderSide(color: isSelected ? colors.primary : colors.border, width: isSelected ? 2 : 1),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // STAGE 6: DONE
+  // ─────────────────────────────────────────────────────────────
+  Widget _buildDone(AppColors colors) {
+    final progress = ref.watch(onboardingProvider);
+    final themeLabel = _selectedTheme == ThemeMode.dark ? 'Dark Mode' : 'Light Mode';
+    final fontLabel = _selectedFont == AppFontFamily.sans 
+        ? 'Sans Serif' 
+        : _selectedFont == AppFontFamily.serif 
+            ? 'Serif' 
+            : 'Mono (Stealth)';
+    
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const SizedBox(height: 24),
+        
+        // App Logo with a glowing subtle background
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    colors.primary.withValues(alpha: 0.15),
+                    colors.primary.withValues(alpha: 0.0),
+                  ],
+                ),
+              ),
+            ),
+            Image.asset(
+              'assets/images/app_logo.png',
+              width: 90,
+              height: 90,
+              fit: BoxFit.contain,
+            ),
+          ],
+        ),
+        const SizedBox(height: 32),
+
+        const Text(
+          'You\'re All Set! 🚀',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 32, 
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.5,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Kivo Workspace is ready. Your custom environment is configured\nand all AI models will run privately on your device.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 15, 
+            color: colors.textSecondary, 
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 36),
+
+        // Setup Summary Card
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: colors.sidebarBackground,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: colors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'CONFIGURATION SUMMARY',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: colors.textMuted,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _summaryRow(Icons.color_lens_outlined, 'Appearance Theme', themeLabel, colors),
+              const SizedBox(height: 12),
+              _summaryRow(Icons.font_download_outlined, 'Workspace Typography', fontLabel, colors),
+              const SizedBox(height: 12),
+              _summaryRow(
+                Icons.memory_rounded, 
+                'Local Models Installed', 
+                '${progress.selectedModelIds.length} active ${progress.selectedModelIds.length == 1 ? 'model' : 'models'}', 
+                colors
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 40),
+
+        // Launch Action Button
+        SizedBox(
+          width: 240,
+          height: 54,
+          child: ElevatedButton(
+            onPressed: () {
+              ref.read(themeModeProvider.notifier).state = _selectedTheme;
+              ref.read(fontProvider.notifier).state = _selectedFont;
+              ref.read(accentColorProvider.notifier).state = _selectedAccent;
+              context.go('/');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 0,
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('Open Workspace', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                SizedBox(width: 8),
+                Icon(Icons.rocket_launch_rounded, size: 18),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 48),
+      ],
+    );
+  }
+
+  Widget _summaryRow(IconData icon, String title, String value, AppColors colors) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: colors.background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: colors.border),
+          ),
+          child: Icon(icon, size: 16, color: colors.primary),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(fontSize: 13, color: colors.textSecondary, fontWeight: FontWeight.w500),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: colors.primarySubtle,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: colors.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // MODEL CARDS
+  // ─────────────────────────────────────────────────────────────
   List<Widget> _buildCustomModelPanel(OnboardingNotifier notifier, OnboardingProgress progress, AppColors colors) {
     return [
       Container(
@@ -662,7 +1496,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           ],
         ),
       ),
-      if (_verifiedCustomModel != null) ...[  
+      if (_verifiedCustomModel != null) ...[
         const SizedBox(height: 16),
         Row(
           children: [
@@ -672,15 +1506,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           ],
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 120,
-          child: _buildCompactModelCard(_verifiedCustomModel!, progress, notifier, colors),
-        ),
+        SizedBox(height: 120, child: _buildCompactModelCard(_verifiedCustomModel!, progress, notifier, colors)),
       ],
     ];
   }
 
-  // --- Compact Model Card ---
   Widget _buildCompactModelCard(CuratedModel model, OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
     final isSelected = progress.selectedModelIds.contains(model.id);
     final Color ramText;
@@ -751,7 +1581,141 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  // --- Custom model helpers ---
+  String _formatDownloadSize(double sizeGb) {
+    if (sizeGb < 1.0) {
+      return '${(sizeGb * 1000).toStringAsFixed(0)} MB';
+    } else {
+      return '${sizeGb.toStringAsFixed(1)} GB';
+    }
+  }
+
+  Widget _buildInstalledModelCard(
+    CuratedModel model, 
+    OnboardingProgress progress, 
+    OnboardingNotifier notifier, 
+    AppColors colors
+  ) {
+    final isSelected = progress.selectedModelIds.contains(model.id);
+    bool isDeleting = false;
+
+    return StatefulBuilder(
+      builder: (context, setCardState) {
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isSelected ? colors.primary.withValues(alpha: 0.05) : colors.background,
+            border: Border.all(color: isSelected ? colors.primary : colors.border, width: isSelected ? 2 : 1),
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: isSelected ? [BoxShadow(color: colors.primary.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 4))] : null,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          model.name, 
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5), 
+                          overflow: TextOverflow.ellipsis
+                        ),
+                        Text(
+                          model.capability, 
+                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: colors.textMuted), 
+                          overflow: TextOverflow.ellipsis
+                        ),
+                      ],
+                    ),
+                  ),
+                  Transform.scale(
+                    scale: 0.85,
+                    child: Checkbox(
+                      value: isSelected,
+                      onChanged: (_) => notifier.toggleModelSelection(model.id),
+                      activeColor: colors.primary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Text(
+                model.description, 
+                style: TextStyle(fontSize: 9.5, color: colors.textSecondary, height: 1.25), 
+                maxLines: 2, 
+                overflow: TextOverflow.ellipsis
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: colors.statusReadyBg, 
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: colors.statusReady.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      'Installed', 
+                      style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: colors.statusReady)
+                    ),
+                  ),
+                  const Spacer(),
+                  if (isDeleting)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.red)),
+                    )
+                  else
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      tooltip: 'Delete Model',
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            backgroundColor: colors.background,
+                            title: const Text('Delete Model', style: TextStyle(fontWeight: FontWeight.bold)),
+                            content: Text('Are you sure you want to delete ${model.name} from your local Ollama engine? This action cannot be undone.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: Text('Cancel', style: TextStyle(color: colors.textSecondary)),
+                              ),
+                              ElevatedButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) {
+                          setCardState(() => isDeleting = true);
+                          await notifier.deleteInstalledModel(model.id);
+                        }
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // CUSTOM MODEL HELPERS
+  // ─────────────────────────────────────────────────────────────
   String _extractModelId(String input) {
     final trimmed = input.trim();
     final pullPrefixRegex = RegExp(r'^ollama\s+pull\s+', caseSensitive: false);
@@ -860,677 +1824,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
 
     if (!curatedModelRegistry.any((m) => m.id == customModel.id)) curatedModelRegistry.add(customModel);
-    final sel = ref.read(onboardingProvider);
-    if (!sel.selectedModelIds.contains(customModel.id)) notifier.toggleModelSelection(customModel.id);
+    if (!ref.read(onboardingProvider).selectedModelIds.contains(customModel.id)) notifier.toggleModelSelection(customModel.id);
     setState(() { _isValidatingCustomModel = false; _verifiedCustomModel = customModel; });
   }
 
-  // --- STAGE 3: SUMMARY ---
-  Widget _buildSummary(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    final downloadSize = notifier.getCalculatedDownloadSize();
-    final freeDiskString = progress.systemSpecs['diskValue'] ?? '20.0';
-    final freeDisk = double.tryParse(freeDiskString) ?? 20.0;
-    final installSize = downloadSize * 2.0; // Estimate footprint as double download size
-    final spaceEnough = freeDisk > installSize;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Installation Summary',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Please review the packages to be downloaded and installed on your host machine.',
-          style: TextStyle(fontSize: 14, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 24),
-
-        // List of items
-        Container(
-          decoration: BoxDecoration(
-            color: colors.sidebarBackground,
-            border: Border.all(color: colors.border),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            children: [
-              _summaryItemTile(
-                'Ollama Engine',
-                progress.isOllamaInstalled ? 'Already Installed (Skipped)' : 'Required for running local LLMs',
-                progress.isOllamaInstalled ? '0 MB' : '300 MB',
-                colors,
-                isInstalled: progress.isOllamaInstalled,
-              ),
-              ...progress.selectedModelIds.map((id) {
-                final match = curatedModelRegistry.firstWhere((m) => m.id == id);
-                final isModelInstalled = progress.installedOllamaModels.any((m) => m == id || m.startsWith('$id:') || id.startsWith('$m:'));
-                return _summaryItemTile(
-                  match.name,
-                  isModelInstalled ? 'Already Installed (Skipped)' : 'Ollama Local LLM',
-                  isModelInstalled ? '0 MB' : match.size,
-                  colors,
-                  isInstalled: isModelInstalled,
-                );
-              }),
-              _summaryItemTile(
-                'Embedding Engine',
-                progress.isEmbeddingModelInstalled ? 'Already Installed (Skipped)' : 'ONNX quantized model (gte-multilingual-base)',
-                progress.isEmbeddingModelInstalled ? '0 MB' : '600 MB',
-                colors,
-                isInstalled: progress.isEmbeddingModelInstalled,
-              ),
-              _summaryItemTile(
-                'FFmpeg Binary',
-                progress.isFfmpegInstalled ? 'Already Installed (Skipped)' : 'Required for audio transcription',
-                progress.isFfmpegInstalled ? '0 MB' : '70 MB',
-                colors,
-                isInstalled: progress.isFfmpegInstalled,
-              ),
-              _summaryItemTile(
-                'Tesseract OCR',
-                progress.isTesseractInstalled ? 'Already Installed (Skipped)' : 'Required for extracting text from images',
-                progress.isTesseractInstalled ? '0 MB' : '40 MB',
-                colors,
-                isInstalled: progress.isTesseractInstalled,
-              ),
-              const Divider(height: 1),
-              Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  iconColor: colors.primary,
-                  collapsedIconColor: colors.textSecondary,
-                  title: Row(
-                    children: [
-                      Icon(Icons.more_horiz, size: 18, color: colors.textSecondary),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Others',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
-                          color: colors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  children: [
-                    const Divider(height: 1, indent: 16, endIndent: 16),
-                    _summaryItemTile(
-                      'Python Libraries',
-                      progress.isPythonInstalled ? 'Already Installed (Skipped)' : 'Quantized tokenizers, FAISS, ONNX-Runtime core dependencies',
-                      progress.isPythonInstalled ? '0 MB' : '400 MB',
-                      colors,
-                      isInstalled: progress.isPythonInstalled,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 32),
-
-        // Disk details row
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: spaceEnough ? colors.statusReadyBg : colors.statusFailedBg,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                spaceEnough ? Icons.check_circle_outline : Icons.warning_amber_rounded,
-                color: spaceEnough ? colors.statusReady : colors.statusFailed,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Total Download Size: ${downloadSize.toStringAsFixed(1)} GB  |  Footprint on Disk: ${installSize.toStringAsFixed(1)} GB',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: spaceEnough ? colors.statusReady : colors.statusFailed,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Your device has ${freeDisk.toStringAsFixed(1)} GB free storage remaining.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: spaceEnough ? colors.statusReady : colors.statusFailed,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 40),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            OutlinedButton(
-              onPressed: () => notifier.prevStage(),
-              child: const Text('Back'),
-            ),
-            ElevatedButton(
-              onPressed: !spaceEnough ? null : () => notifier.nextStage(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: colors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              ),
-              child: const Text('Proceed to Download'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _summaryItemTile(String name, String description, String size, AppColors colors, {bool isInstalled = false}) {
-    return ListTile(
-      leading: Icon(
-        isInstalled ? Icons.check_circle : Icons.check_circle_outline,
-        size: 16,
-        color: isInstalled ? colors.statusReady : colors.primary,
-      ),
-      title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-      subtitle: Text(description, style: TextStyle(fontSize: 11, color: colors.textSecondary)),
-      trailing: Text(size, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: isInstalled ? colors.statusReady : colors.textPrimary)),
-    );
-  }
-
-  // --- STAGE 4: DOWNLOADING ---
-  Widget _buildDownloading(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const SizedBox(height: 40),
-        const Text(
-          'Downloading Workspace Patch',
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Please do not close the application. Downloading required local binaries.',
-          style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 48),
-
-        // Speed details row
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Download speed: ${progress.downloadSpeed} MB/s', style: TextStyle(fontSize: 13, color: colors.textSecondary)),
-            Text('Time remaining: ${progress.downloadEta}', style: TextStyle(fontSize: 13, color: colors.textSecondary)),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Progress bar
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: progress.downloadProgress,
-            minHeight: 12,
-            backgroundColor: colors.border,
-            valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Text(
-              '${progress.downloadedMb.toStringAsFixed(0)} MB / ${progress.totalMb.toStringAsFixed(0)} MB',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: colors.textPrimary),
-            ),
-          ],
-        ),
-
-        // Connectivity Retry Overlay
-        if (!progress.isInternetConnected)
-          Container(
-            margin: const EdgeInsets.only(top: 32),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: colors.statusFailedBg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: colors.statusFailed),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.wifi_off, color: colors.statusFailed),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'No Internet Connection Available',
-                        style: TextStyle(fontWeight: FontWeight.bold, color: colors.statusFailed, fontSize: 13.5),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Please verify your system network connection to continue.',
-                        style: TextStyle(color: colors.statusFailed, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () => notifier.retryDownload(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: colors.statusFailed,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
-
-        const SizedBox(height: 80),
-      ],
-    );
-  }
-
-  // --- STAGE 5: INSTALLING ---
-  Widget _buildInstalling(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Extracting & Installing Binaries',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Setting up binary folders and setting file execution permissions.',
-          style: TextStyle(fontSize: 14, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 32),
-
-        // Installer Checklist
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: colors.sidebarBackground,
-            border: Border.all(color: colors.border),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            children: progress.installStatus.entries.map((entry) {
-              final isDone = entry.value.contains('Completed');
-              final isInProgress = entry.value.contains('Extracting');
-              return ListTile(
-                leading: isInProgress
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Icon(
-                        isDone ? Icons.check_circle : Icons.circle_outlined,
-                        color: isDone ? colors.statusReady : colors.textMuted,
-                        size: 18,
-                      ),
-                title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                trailing: Text(entry.value, style: TextStyle(fontSize: 12, color: isInProgress ? colors.primary : colors.textSecondary)),
-              );
-            }).toList(),
-          ),
-        ),
-        const SizedBox(height: 24),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: LinearProgressIndicator(
-            value: progress.downloadProgress,
-            minHeight: 8,
-            backgroundColor: colors.border,
-            valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
-          ),
-        ),
-        const SizedBox(height: 40),
-      ],
-    );
-  }
-
-  // --- STAGE 6: CONFIGURATIONS ---
-  Widget _buildConfigurations(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'System Configurations',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Launching local backend subprocess and pulling selected LLM weights into Ollama.',
-          style: TextStyle(fontSize: 14, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 32),
-
-        // Config Checklist
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: colors.sidebarBackground,
-            border: Border.all(color: colors.border),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            children: progress.installStatus.entries.map((entry) {
-              final isDone = entry.value.contains('Completed') || entry.value.contains('Ready') || entry.value.contains('Online');
-              final isInProgress = entry.value.contains('Progress') || entry.value.contains('Downloading') || entry.value.contains('Spawning');
-              return ListTile(
-                leading: isInProgress
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Icon(
-                        isDone ? Icons.check_circle : Icons.circle_outlined,
-                        color: isDone ? colors.statusReady : colors.textMuted,
-                        size: 18,
-                      ),
-                title: Text(entry.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-                trailing: Text(
-                  entry.value,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isInProgress ? colors.primary : isDone ? colors.statusReady : colors.textSecondary,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-        const SizedBox(height: 40),
-      ],
-    );
-  }
-
-  // --- STAGE 7: APPEARANCE ---
-  Widget _buildAppearance(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    final isDark = _selectedTheme == ThemeMode.dark;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Customize Appearance',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Configure Kivo Workspace theme, fonts, and accents according to your preference.',
-          style: TextStyle(fontSize: 14, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 32),
-
-        // 1. Theme selection
-        const Text('Theme Mode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            _outlinedButtonIcon(
-              onPressed: () {
-                setState(() => _selectedTheme = ThemeMode.light);
-                ref.read(themeModeProvider.notifier).state = ThemeMode.light;
-              },
-              icon: Icons.light_mode_outlined,
-              label: 'Light Mode',
-              isSelected: _selectedTheme == ThemeMode.light,
-              colors: colors,
-            ),
-            const SizedBox(width: 16),
-            _outlinedButtonIcon(
-              onPressed: () {
-                setState(() => _selectedTheme = ThemeMode.dark);
-                ref.read(themeModeProvider.notifier).state = ThemeMode.dark;
-              },
-              icon: Icons.dark_mode_outlined,
-              label: 'Dark Mode',
-              isSelected: _selectedTheme == ThemeMode.dark,
-              colors: colors,
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-
-        // 2. Typography selection
-        const Text('Active Typography', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        const SizedBox(height: 12),
-        SegmentedButton<AppFontFamily>(
-          segments: const [
-            ButtonSegment(value: AppFontFamily.sans, label: Text('Sans Serif')),
-            ButtonSegment(value: AppFontFamily.serif, label: Text('Serif')),
-            ButtonSegment(value: AppFontFamily.mono, label: Text('Mono (Stealth)')),
-          ],
-          selected: {_selectedFont},
-          onSelectionChanged: (val) {
-            setState(() => _selectedFont = val.first);
-            ref.read(fontProvider.notifier).state = val.first;
-          },
-          style: ButtonStyle(
-            shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 28),
-
-        // 3. Accent highlight selection
-        const Text('Accent Highlight Color', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            ..._accentColors.map((color) {
-              final isSelected = _selectedAccent == color;
-              return GestureDetector(
-                onTap: () {
-                  setState(() => _selectedAccent = color);
-                  ref.read(accentColorProvider.notifier).state = color;
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(right: 16),
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: isSelected
-                        ? Border.all(color: isDark ? Colors.white : Colors.black, width: 2.5)
-                        : Border.all(color: Colors.transparent),
-                  ),
-                ),
-              );
-            }),
-
-            // Palette custom color selector (Rainbow sweep gradient)
-            GestureDetector(
-              onTap: () => _showCustomColorPickerDialog(context, colors),
-              child: Tooltip(
-                message: 'Custom Color Palette',
-                child: Container(
-                  margin: const EdgeInsets.only(right: 16),
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: !_accentColors.contains(_selectedAccent)
-                          ? (isDark ? Colors.white : Colors.black)
-                          : colors.border,
-                      width: !_accentColors.contains(_selectedAccent) ? 2.5 : 1,
-                    ),
-                    gradient: const SweepGradient(
-                      colors: [
-                        Colors.red,
-                        Colors.yellow,
-                        Colors.green,
-                        Colors.cyan,
-                        Colors.blue,
-                        Color(0xFFFF00FF),
-                        Colors.red,
-                      ],
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.palette_rounded,
-                    size: 16,
-                    color: !_accentColors.contains(_selectedAccent)
-                        ? (isDark ? Colors.white : Colors.black)
-                        : Colors.white.withValues(alpha: 0.8),
-                  ),
-                ),
-              ),
-            ),
-
-            // Eyedropper (Pick from anywhere on screen)
-            GestureDetector(
-              onTap: () async {
-                final Color? picked = await EyedropperHelper.pickColor(context);
-                if (picked != null) {
-                  setState(() => _selectedAccent = picked);
-                  ref.read(accentColorProvider.notifier).state = picked;
-                }
-              },
-              child: Tooltip(
-                message: 'Pick Color from Screen',
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: colors.border),
-                    color: colors.sidebarBackground,
-                  ),
-                  child: Icon(
-                    Icons.colorize_rounded,
-                    size: 16,
-                    color: colors.textPrimary,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 48),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            OutlinedButton(
-              onPressed: () {
-                // Restore defaults
-                setState(() {
-                  _selectedTheme = ThemeMode.dark;
-                  _selectedFont = AppFontFamily.sans;
-                  _selectedAccent = const Color(0xFF0075DE);
-                });
-                ref.read(themeModeProvider.notifier).state = ThemeMode.dark;
-                ref.read(fontProvider.notifier).state = AppFontFamily.sans;
-                ref.read(accentColorProvider.notifier).state = const Color(0xFF0075DE);
-              },
-              child: const Text('Restore Defaults'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                notifier.completeOnboarding(
-                  theme: _selectedTheme,
-                  font: _selectedFont.name,
-                  accentHex: '#${_selectedAccent.toARGB32().toRadixString(16).substring(2)}',
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: colors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-              ),
-              child: const Text('Submit & Finish'),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _outlinedButtonIcon({
-    required VoidCallback onPressed,
-    required IconData icon,
-    required String label,
-    required bool isSelected,
-    required AppColors colors,
-  }) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 16, color: isSelected ? colors.primary : colors.textSecondary),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: isSelected ? colors.primary : colors.textSecondary,
-        side: BorderSide(color: isSelected ? colors.primary : colors.border, width: isSelected ? 2 : 1),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      ),
-    );
-  }
-
-  // --- STAGE 8: DONE SCREEN ---
-  Widget _buildDone(OnboardingProgress progress, OnboardingNotifier notifier, AppColors colors) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const SizedBox(height: 40),
-        const Icon(
-          Icons.celebration_rounded,
-          size: 72,
-          color: Color(0xFF0F7B44),
-        ),
-        const SizedBox(height: 24),
-        const Text(
-          'All Systems Ready! 🚀',
-          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'All setups are done and we are ready to make some boom.',
-          style: TextStyle(fontSize: 14, color: colors.textSecondary),
-        ),
-        const SizedBox(height: 48),
-
-        ElevatedButton(
-          onPressed: () {
-            // Apply preferences to providers directly
-            ref.read(themeModeProvider.notifier).state = _selectedTheme;
-            ref.read(fontProvider.notifier).state = _selectedFont;
-            ref.read(accentColorProvider.notifier).state = _selectedAccent;
-
-            // Route to home dashboard
-            context.go('/');
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: colors.statusReady,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 18),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            elevation: 0,
-          ),
-          child: const Text(
-            'Get Started',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-          ),
-        ),
-        const SizedBox(height: 64),
-      ],
-    );
-  }
-
+  // ─────────────────────────────────────────────────────────────
+  // CUSTOM COLOR PICKER DIALOG
+  // ─────────────────────────────────────────────────────────────
   Future<void> _showCustomColorPickerDialog(BuildContext context, AppColors colors) async {
     final Color originalColor = _selectedAccent;
     Color currentColor = _selectedAccent;
@@ -1539,20 +1839,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       if (!context.mounted) break;
       final Color? result = await showDialog<Color>(
         context: context,
-        builder: (context) => CustomColorPickerDialog(
-          initialColor: currentColor,
-          colors: colors,
-        ),
+        builder: (context) => CustomColorPickerDialog(initialColor: currentColor, colors: colors),
       );
 
       if (result == null) {
-        // Revert to original color on cancel
         ref.read(accentColorProvider.notifier).state = originalColor;
         break;
       }
 
       if (result.toARGB32() == 0) {
-        // Sentinel color: run eyedropper
         if (!context.mounted) break;
         final Color? picked = await EyedropperHelper.pickColor(context);
         if (picked != null) {
@@ -1560,7 +1855,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           ref.read(accentColorProvider.notifier).state = picked;
         }
       } else {
-        // Apply final chosen color
         setState(() => _selectedAccent = result);
         ref.read(accentColorProvider.notifier).state = result;
         break;
@@ -1569,15 +1863,14 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// CUSTOM COLOR PICKER DIALOG WIDGET (unchanged from original)
+// ─────────────────────────────────────────────────────────────
 class CustomColorPickerDialog extends ConsumerStatefulWidget {
   final Color initialColor;
   final AppColors colors;
 
-  const CustomColorPickerDialog({
-    super.key,
-    required this.initialColor,
-    required this.colors,
-  });
+  const CustomColorPickerDialog({super.key, required this.initialColor, required this.colors});
 
   @override
   ConsumerState<CustomColorPickerDialog> createState() => _CustomColorPickerDialogState();
@@ -1599,9 +1892,7 @@ class _CustomColorPickerDialogState extends ConsumerState<CustomColorPickerDialo
     _saturation = hsv.saturation;
     _value = hsv.value;
     final hexStr = _selectedColor.toARGB32().toRadixString(16).padLeft(8, '0');
-    _hexController = TextEditingController(
-      text: hexStr.substring(2).toUpperCase(),
-    );
+    _hexController = TextEditingController(text: hexStr.substring(2).toUpperCase());
   }
 
   @override
@@ -1635,12 +1926,7 @@ class _CustomColorPickerDialogState extends ConsumerState<CustomColorPickerDialo
       try {
         final color = Color(int.parse('FF$cleanHex', radix: 16));
         final hsv = HSVColor.fromColor(color);
-        setState(() {
-          _selectedColor = color;
-          _hue = hsv.hue;
-          _saturation = hsv.saturation;
-          _value = hsv.value;
-        });
+        setState(() { _selectedColor = color; _hue = hsv.hue; _saturation = hsv.saturation; _value = hsv.value; });
         ref.read(accentColorProvider.notifier).state = _selectedColor;
       } catch (_) {}
     }
@@ -1664,63 +1950,26 @@ class _CustomColorPickerDialogState extends ConsumerState<CustomColorPickerDialo
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Custom Accent Color',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: colors.textPrimary,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  color: colors.textSecondary,
-                  onPressed: () => Navigator.pop(context),
-                ),
+                Text('Custom Accent Color', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: colors.textPrimary)),
+                IconButton(icon: const Icon(Icons.close), color: colors.textSecondary, onPressed: () => Navigator.pop(context)),
               ],
             ),
             const SizedBox(height: 16),
-            
-            // SV Picker Box
             LayoutBuilder(
               builder: (context, constraints) {
                 return SVBoxPicker(
-                  hue: _hue,
-                  saturation: _saturation,
-                  value: _value,
-                  onChange: (offset) => _onSVChange(
-                    offset,
-                    constraints.maxWidth,
-                    180,
-                  ),
+                  hue: _hue, saturation: _saturation, value: _value,
+                  onChange: (offset) => _onSVChange(offset, constraints.maxWidth, 180),
                 );
               },
             ),
             const SizedBox(height: 16),
-
-            // Hue Slider
-            HueSlider(
-              hue: _hue,
-              onChange: _onHueChange,
-            ),
+            HueSlider(hue: _hue, onChange: _onHueChange),
             const SizedBox(height: 20),
-
-            // Color display, hex input & eyedropper
             Row(
               children: [
-                // Color preview circle
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: _selectedColor,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: colors.border),
-                  ),
-                ),
+                Container(width: 40, height: 40, decoration: BoxDecoration(color: _selectedColor, shape: BoxShape.circle, border: Border.all(color: colors.border))),
                 const SizedBox(width: 16),
-                
-                // Hex Input Field
                 Expanded(
                   child: TextField(
                     controller: _hexController,
@@ -1731,50 +1980,25 @@ class _CustomColorPickerDialogState extends ConsumerState<CustomColorPickerDialo
                       prefixStyle: TextStyle(color: colors.textSecondary, fontWeight: FontWeight.bold),
                       labelText: 'Hex Code',
                       labelStyle: TextStyle(color: colors.textSecondary),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: colors.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: _selectedColor, width: 2),
-                      ),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: colors.border)),
+                      focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: _selectedColor, width: 2)),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
-
-                // Eyedropper within dialog
-                IconButton(
-                  icon: const Icon(Icons.colorize_rounded),
-                  color: colors.textPrimary,
-                  tooltip: 'Pick from screen',
-                  onPressed: () {
-                    Navigator.pop(context, const Color(0x00000000));
-                  },
-                ),
+                IconButton(icon: const Icon(Icons.colorize_rounded), color: colors.textPrimary, tooltip: 'Pick from screen', onPressed: () => Navigator.pop(context, const Color(0x00000000))),
               ],
             ),
             const SizedBox(height: 24),
-
-            // Dialog actions
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
-                  child: Text('Cancel', style: TextStyle(color: colors.textSecondary)),
-                ),
+                TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: colors.textSecondary))),
                 const SizedBox(width: 12),
                 ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context, _selectedColor);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _selectedColor,
-                    foregroundColor: isDark ? Colors.white : Colors.black,
-                  ),
+                  onPressed: () => Navigator.pop(context, _selectedColor),
+                  style: ElevatedButton.styleFrom(backgroundColor: _selectedColor, foregroundColor: isDark ? Colors.white : Colors.black),
                   child: const Text('Apply Accent'),
                 ),
               ],
@@ -1786,19 +2010,16 @@ class _CustomColorPickerDialogState extends ConsumerState<CustomColorPickerDialo
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// SV BOX PICKER
+// ─────────────────────────────────────────────────────────────
 class SVBoxPicker extends StatelessWidget {
   final double hue;
   final double saturation;
   final double value;
   final ValueChanged<Offset> onChange;
 
-  const SVBoxPicker({
-    super.key,
-    required this.hue,
-    required this.saturation,
-    required this.value,
-    required this.onChange,
-  });
+  const SVBoxPicker({super.key, required this.hue, required this.saturation, required this.value, required this.onChange});
 
   @override
   Widget build(BuildContext context) {
@@ -1814,33 +2035,25 @@ class SVBoxPicker extends StatelessWidget {
 
           return Container(
             height: 180,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white24),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.white24)),
             child: Stack(
               clipBehavior: Clip.none,
               children: [
                 Positioned.fill(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: CustomPaint(
-                      painter: HSVColorPainter(hue),
-                    ),
+                    child: CustomPaint(painter: HSVColorPainter(hue)),
                   ),
                 ),
                 Positioned(
                   left: (cursorX - 8).clamp(-8.0, width - 8.0),
                   top: (cursorY - 8).clamp(-8.0, height - 8.0),
                   child: Container(
-                    width: 16,
-                    height: 16,
-                    decoration: BoxDecoration(
+                    width: 16, height: 16,
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black38, blurRadius: 4)
-                      ],
+                      border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 2)),
+                      boxShadow: [BoxShadow(color: Colors.black38, blurRadius: 4)],
                     ),
                   ),
                 ),
@@ -1855,29 +2068,16 @@ class SVBoxPicker extends StatelessWidget {
 
 class HSVColorPainter extends CustomPainter {
   final double hue;
-
   HSVColorPainter(this.hue);
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-
     final hsvColor = HSVColor.fromAHSV(1.0, hue, 1.0, 1.0).toColor();
-    final horizontalShader = ui.Gradient.linear(
-      Offset.zero,
-      Offset(size.width, 0),
-      [Colors.white, hsvColor],
-    );
-    final horizontalPaint = Paint()..shader = horizontalShader;
+    final horizontalPaint = Paint()..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0), [Colors.white, hsvColor]);
     canvas.drawRect(rect, horizontalPaint);
-
-    final verticalShader = ui.Gradient.linear(
-      Offset.zero,
-      Offset(0, size.height),
-      [Colors.transparent, Colors.black],
-    );
     final verticalPaint = Paint()
-      ..shader = verticalShader
+      ..shader = ui.Gradient.linear(Offset.zero, Offset(0, size.height), [Colors.transparent, Colors.black])
       ..blendMode = BlendMode.multiply;
     canvas.drawRect(rect, verticalPaint);
   }
@@ -1886,15 +2086,14 @@ class HSVColorPainter extends CustomPainter {
   bool shouldRepaint(covariant HSVColorPainter oldDelegate) => oldDelegate.hue != hue;
 }
 
+// ─────────────────────────────────────────────────────────────
+// HUE SLIDER
+// ─────────────────────────────────────────────────────────────
 class HueSlider extends StatelessWidget {
   final double hue;
   final ValueChanged<double> onChange;
 
-  const HueSlider({
-    super.key,
-    required this.hue,
-    required this.onChange,
-  });
+  const HueSlider({super.key, required this.hue, required this.onChange});
 
   @override
   Widget build(BuildContext context) {
@@ -1908,34 +2107,26 @@ class HueSlider extends StatelessWidget {
 
           return Container(
             height: 20,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.white24),
-            ),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.white24)),
             child: Stack(
               clipBehavior: Clip.none,
               children: [
                 Positioned.fill(
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(4),
-                    child: CustomPaint(
-                      painter: HueSliderPainter(),
-                    ),
+                    child: CustomPaint(painter: HueSliderPainter()),
                   ),
                 ),
                 Positioned(
                   left: (cursorX - 6).clamp(-6.0, width - 6.0),
                   top: -2,
                   child: Container(
-                    width: 12,
-                    height: 24,
+                    width: 12, height: 24,
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(3),
                       border: Border.all(color: Colors.black26),
-                      boxShadow: const [
-                        BoxShadow(color: Colors.black38, blurRadius: 2)
-                      ],
+                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 2)],
                     ),
                   ),
                 ),
@@ -1949,8 +2140,7 @@ class HueSlider extends StatelessWidget {
 
   void _updateHue(Offset localPos, BuildContext context) {
     final RenderBox box = context.findRenderObject() as RenderBox;
-    final width = box.size.width;
-    final double percent = (localPos.dx / width).clamp(0.0, 1.0);
+    final double percent = (localPos.dx / box.size.width).clamp(0.0, 1.0);
     onChange(percent * 360.0);
   }
 }
@@ -1959,21 +2149,8 @@ class HueSliderPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final colors = [
-      const Color(0xFFFF0000), // Red
-      const Color(0xFFFFFF00), // Yellow
-      const Color(0xFF00FF00), // Green
-      const Color(0xFF00FFFF), // Cyan
-      const Color(0xFF0000FF), // Blue
-      const Color(0xFFFF00FF), // Magenta
-      const Color(0xFFFF0000), // Red
-    ];
-    final shader = ui.Gradient.linear(
-      Offset.zero,
-      Offset(size.width, 0),
-      colors,
-    );
-    final paint = Paint()..shader = shader;
+    const colors = [Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00), Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFFFF00FF), Color(0xFFFF0000)];
+    final paint = Paint()..shader = ui.Gradient.linear(Offset.zero, Offset(size.width, 0), colors);
     canvas.drawRRect(RRect.fromRectAndRadius(rect, const Radius.circular(4)), paint);
   }
 

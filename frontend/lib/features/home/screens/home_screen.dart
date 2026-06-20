@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -97,10 +98,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     // Dynamic backend spawner check at app launch
-    final service = ref.read(onboardingServiceProvider);
-    final isHealthy = await service.isBackendHealthy();
-    if (!isHealthy) {
-      await service.spawnBackendProcess(defaultModel: activeModel);
+    if (!kIsWeb) {
+      final service = ref.read(onboardingServiceProvider);
+      final isHealthy = await service.isBackendHealthy();
+      if (!isHealthy) {
+        await service.spawnBackendProcess(defaultModel: activeModel);
+      }
     }
 
     // Trigger onboarding tutorial overlay if not complete yet
@@ -535,7 +538,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Image.asset(
             key: TutorialKeys.logo,
             isDark ? 'assets/images/branding_dark.png' : 'assets/images/branding_light.png',
-            height: 22,
+            height: 38,
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) {
               return Text(
@@ -668,6 +671,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildUpdateSection(BuildContext context, StateSetter setSheetState) {
+    if (kIsWeb) {
+      return const SizedBox.shrink();
+    }
     final colors = context.colors;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final updateService = UpdateService();

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -104,7 +105,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
           
           // Trigger system notification if enabled
           final notificationsOn = ref.read(notificationsEnabledProvider);
-          if (notificationsOn) {
+          if (notificationsOn && !kIsWeb) {
             try {
               if (Platform.isMacOS) {
                 Process.run('osascript', [

@@ -27,6 +27,7 @@ class ONNXEmbeddingModel:
         
         # Select best execution provider
         import onnxruntime as ort
+        import os
         available_providers = ort.get_available_providers()
         # CoreMLExecutionProvider has compatibility issues with dynamic INT8 quantized NLP models, so we exclude it.
         preferred_providers = ["CUDAExecutionProvider", "DirectMLExecutionProvider", "CPUExecutionProvider"]
@@ -35,7 +36,16 @@ class ONNXEmbeddingModel:
         logger.info(f"Available ONNX Execution Providers: {available_providers}")
         logger.info(f"Selected ONNX Execution Providers: {providers}")
         
-        self.session = ort.InferenceSession(model_path, providers=providers)
+        # Configure session options for multi-threaded CPU inference
+        import multiprocessing
+        num_threads = min(8, max(1, multiprocessing.cpu_count() // 2))
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = num_threads   # threads within a single op
+        sess_options.inter_op_num_threads = num_threads   # threads across parallel ops
+        sess_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+        logger.info(f"ONNX session using {num_threads} threads (intra+inter).")
+        
+        self.session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
 
     def encode(
         self,
@@ -216,7 +226,7 @@ class EmbeddingProcessor:
         # Generate normalized embeddings (so Inner Product matches Cosine Similarity in FAISS)
         embeddings = model.encode(
             texts,
-            batch_size=16,
+            batch_size=32,   # Increased from 16 → 32 for better CPU throughput
             show_progress_bar=False,
             normalize_embeddings=True
         )

@@ -35,12 +35,19 @@ def inject_local_env():
             print(f"[BOOTSTRAP] Injected local dependencies from: {site_packages}")
 
 inject_local_env()
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
+# Allow ONNX runtime and PyTorch to use multiple CPU threads for faster embedding.
+# Previously locked to 1 (to avoid OpenMP/FAISS conflict) but FAISS import order
+# handles that now — letting the embedding model use up to 8 threads.
+import multiprocessing as _mp
+_cpu_count = _mp.cpu_count()
+_embed_threads = str(min(8, max(1, _cpu_count // 2)))  # Half of cores, max 8
+os.environ["OMP_NUM_THREADS"] = _embed_threads
+os.environ["MKL_NUM_THREADS"] = _embed_threads
+os.environ["OPENBLAS_NUM_THREADS"] = _embed_threads
+os.environ["VECLIB_MAXIMUM_THREADS"] = _embed_threads
+os.environ["NUMEXPR_NUM_THREADS"] = _embed_threads
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["ONNXRUNTIME_NUM_THREADS"] = _embed_threads
 
 import logging
 from contextlib import asynccontextmanager
@@ -80,21 +87,43 @@ def run_diagnostics():
     try:
         ollama_url = f"{settings.ollama_base_url}/api/tags"
         response = requests.get(ollama_url, timeout=3)
-        if response.status_code == 200:
-            models_data = response.json()
-            models_list = [m.get("name") for m in models_data.get("models", [])]
-            logger.info(f"[DIAGNOSTIC] Ollama service is active. Available models: {models_list}")
-            
-            # Check default model
-            default_model = settings.ollama_default_model
-            if default_model in models_list or any(default_model in m for m in models_list):
-                logger.info(f"[DIAGNOSTIC] Default LLM model '{default_model}' is available in Ollama.")
-            else:
-                logger.warning(f"[DIAGNOSTIC WARNING] Default LLM model '{default_model}' is NOT pulled in Ollama. Please run: ollama pull {default_model}")
-        else:
-            logger.warning(f"[DIAGNOSTIC WARNING] Ollama service returned status code {response.status_code}.")
     except Exception as e:
-        logger.warning(f"[DIAGNOSTIC WARNING] Could not connect to Ollama service at {settings.ollama_base_url}. Is Ollama running? Error: {e}")
+        logger.warning(f"[DIAGNOSTIC WARNING] Could not connect to Ollama service at {settings.ollama_base_url}. Attempting to start Ollama service...")
+        try:
+            import subprocess
+            import time
+            ollama_path = shutil.which("ollama")
+            if not ollama_path and os.path.exists("/Applications/Ollama.app/Contents/Resources/ollama"):
+                ollama_path = "/Applications/Ollama.app/Contents/Resources/ollama"
+
+            if ollama_path:
+                subprocess.Popen([ollama_path, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                logger.info("[DIAGNOSTIC] Started Ollama service in background. Waiting 1.5 seconds for it to bind...")
+                time.sleep(1.5)
+                try:
+                    response = requests.get(ollama_url, timeout=3)
+                except Exception:
+                    response = None
+            else:
+                logger.warning("[DIAGNOSTIC WARNING] Ollama executable not found on system PATH or Applications folder.")
+                response = None
+        except Exception as start_err:
+            logger.error(f"[DIAGNOSTIC ERROR] Failed to auto-start Ollama: {start_err}")
+            response = None
+
+    if response and response.status_code == 200:
+        models_data = response.json()
+        models_list = [m.get("name") for m in models_data.get("models", [])]
+        logger.info(f"[DIAGNOSTIC] Ollama service is active. Available models: {models_list}")
+        
+        # Check default model
+        default_model = settings.ollama_default_model
+        if default_model in models_list or any(default_model in m for m in models_list):
+            logger.info(f"[DIAGNOSTIC] Default LLM model '{default_model}' is available in Ollama.")
+        else:
+            logger.warning(f"[DIAGNOSTIC WARNING] Default LLM model '{default_model}' is NOT pulled in Ollama. Please run: ollama pull {default_model}")
+    else:
+        logger.warning(f"[DIAGNOSTIC WARNING] Ollama service could not be started or is not reachable.")
         
     logger.info("--- Diagnostics Completed ---")
 
@@ -118,6 +147,19 @@ async def lifespan(app: FastAPI):
     logger.info(f"Ollama target: {settings.ollama_base_url}")
     logger.info(f"Default model: {settings.ollama_default_model}")
 
+    # Pre-warm the embedding model in a background thread so the first
+    # document upload doesn't trigger a cold-load / ONNX conversion delay.
+    import threading
+    def _warm_embedding_model():
+        try:
+            logger.info("[Warmup] Pre-loading embedding model in background...")
+            from app.core.processors.embeddings import get_embedding_model
+            get_embedding_model()
+            logger.info("[Warmup] Embedding model ready.")
+        except Exception as e:
+            logger.warning(f"[Warmup] Embedding model pre-load failed (non-fatal): {e}")
+    threading.Thread(target=_warm_embedding_model, daemon=True, name="embedding-warmup").start()
+
     yield
 
     logger.info("Kivo Workspace API shutting down.")
@@ -136,17 +178,43 @@ app = FastAPI(
 # Allows Flutter desktop app (running on localhost) to communicate with the API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost", "http://127.0.0.1", "file://"],  # Restricted to local origins for security
+    allow_origins=["file://"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+# --- Static Files / SPA Directory Resolution ---
+from fastapi.responses import FileResponse
+
+base_path = Path(__file__).parent
+web_dir = base_path / "frontend" / "build" / "web"
+if not web_dir.exists():
+    # Support sibling directory for local development
+    web_dir = base_path.parent / "frontend" / "build" / "web"
+if not web_dir.exists():
+    web_dir = base_path / "web"
+
+if getattr(sys, "frozen", False):
+    # If running inside PyInstaller bundle, look in sys._MEIPASS first
+    meipass_web = Path(sys._MEIPASS) / "web"
+    if meipass_web.exists():
+        web_dir = meipass_web
+    else:
+        exe_dir = Path(sys.executable).parent
+        if (exe_dir / "web").exists():
+            web_dir = exe_dir / "web"
+
+
 # --- Core Routes ---
 @app.get("/", tags=["Root"])
 async def root():
-    """API root — returns basic app info."""
+    """API root — returns index.html if frontend is built, otherwise basic API info."""
+    index_path = web_dir / "index.html"
+    if web_dir.exists() and index_path.exists():
+        return FileResponse(index_path)
     return {
         "app": settings.app_name,
         "version": settings.app_version,
@@ -351,27 +419,18 @@ from app.api.routes.sources import router as sources_router
 from app.api.routes.processing import router as processing_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.universal_chat import router as universal_chat_router
+from app.api.routes.system import router as system_router
 
 app.include_router(workspaces_router, prefix="/workspaces", tags=["Workspaces"])
 app.include_router(sources_router, prefix="/workspaces/{workspace_id}/sources", tags=["Sources"])
 app.include_router(processing_router, prefix="/workspaces/{workspace_id}/processing", tags=["Processing"])
 app.include_router(chat_router, prefix="/workspaces/{workspace_id}/chat", tags=["Chat"])
 app.include_router(universal_chat_router, prefix="/universal-chat", tags=["Universal Chat"])
+app.include_router(system_router, prefix="/system", tags=["System"])
 
 
 # --- Static Files / SPA Serving ---
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-base_path = Path(__file__).parent
-web_dir = base_path / "frontend" / "build" / "web"
-if not web_dir.exists():
-    web_dir = base_path / "web"
-
-if getattr(sys, "frozen", False):
-    exe_dir = Path(sys.executable).parent
-    if (exe_dir / "web").exists():
-        web_dir = exe_dir / "web"
 
 if web_dir.exists():
     logger.info(f"Serving Flutter frontend from static directory: {web_dir}")
@@ -403,6 +462,34 @@ if web_dir.exists():
         return {"error": "Frontend assets not found"}
 else:
     logger.warning(f"Frontend static directory NOT found at {web_dir}. Single-port web serving is disabled.")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    import argparse
+    import webbrowser
+    import threading
+    import time
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    args = parser.parse_args()
+
+    # Automatically open the browser when packaged/run in production
+    if getattr(sys, "frozen", False):
+        def open_browser():
+            time.sleep(1.5)  # Give uvicorn a moment to start
+            try:
+                webbrowser.open(f"http://{args.host}:{args.port}")
+            except Exception as e:
+                logger.error(f"Failed to open browser: {e}")
+
+        threading.Thread(target=open_browser, daemon=True).start()
+
+    logger.info(f"Starting Kivo Workspace server at http://{args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port)
+
 
 
 

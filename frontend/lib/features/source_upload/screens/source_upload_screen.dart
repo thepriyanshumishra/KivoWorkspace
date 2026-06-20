@@ -328,7 +328,7 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
                         childAspectRatio: MediaQuery.of(context).size.width < 600 ? 3.5 : 1.35,
                         children: [
                           _buildSourceCard(
-                            key: TutorialKeys.addSources,
+                            key: TutorialKeys.pdfSourceCard,
                             context: context,
                             icon: Icons.picture_as_pdf_outlined,
                             title: 'PDF Document',
@@ -606,7 +606,7 @@ class _SourceUploadScreenState extends ConsumerState<SourceUploadScreen> {
 
     if (tutorialState.isActive && tutorialState.currentStep == TutorialStep.addSources) {
       body = TutorialOverlay(
-        targetKey: TutorialKeys.addSources,
+        targetKey: TutorialKeys.pdfSourceCard,
         title: 'Add Knowledge Sources',
         description: 'Upload PDFs, text files, images (OCR), or audio (transcription). All processing happens 100% locally on your machine.',
         onNext: () {

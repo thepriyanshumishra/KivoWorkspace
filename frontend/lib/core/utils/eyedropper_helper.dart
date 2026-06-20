@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -16,29 +17,31 @@ class EyedropperHelper {
 
   /// Pick a color using the best available eyedropper/selector for the platform.
   static Future<Color?> pickColor(BuildContext context) async {
-    // 1. For macOS: Use the native NSColorSampler (which picks inside & outside the app)
-    if (Platform.isMacOS) {
-      try {
-        final String? hex = await _channel.invokeMethod('pickColor');
-        if (hex != null) {
-          return _parseHexColor(hex);
+    if (!kIsWeb) {
+      // 1. For macOS: Use the native NSColorSampler (which picks inside & outside the app)
+      if (Platform.isMacOS) {
+        try {
+          final String? hex = await _channel.invokeMethod('pickColor');
+          if (hex != null) {
+            return _parseHexColor(hex);
+          }
+          return null; // Cancelled
+        } catch (e) {
+          debugPrint('macOS native eyedropper failed: $e. Falling back to in-app.');
         }
-        return null; // Cancelled
-      } catch (e) {
-        debugPrint('macOS native eyedropper failed: $e. Falling back to in-app.');
       }
-    }
 
-    // 2. For Windows: Try the native Win32 ChooseColor dialog, and fallback to in-app.
-    if (Platform.isWindows) {
-      try {
-        final String? hex = await _channel.invokeMethod('pickColor');
-        if (hex != null) {
-          return _parseHexColor(hex);
+      // 2. For Windows: Try the native Win32 ChooseColor dialog, and fallback to in-app.
+      if (Platform.isWindows) {
+        try {
+          final String? hex = await _channel.invokeMethod('pickColor');
+          if (hex != null) {
+            return _parseHexColor(hex);
+          }
+          return null; // Cancelled
+        } catch (e) {
+          debugPrint('Windows native color dialog failed: $e. Falling back to in-app.');
         }
-        return null; // Cancelled
-      } catch (e) {
-        debugPrint('Windows native color dialog failed: $e. Falling back to in-app.');
       }
     }
 

@@ -100,12 +100,15 @@ Both scripts download the latest pre-built binary from [GitHub Releases](https:/
 
 Download the latest release directly from the [Releases page](https://github.com/thepriyanshumishra/KivoWorkspace/releases):
 
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | `KivoWorkspace-macOS-Silicon.zip` |
-| macOS (Intel) | `KivoWorkspace-macOS-Intel.zip` |
-| Windows x64 | `KivoWorkspace-Windows-x64.zip` |
-| Linux x64 | `KivoWorkspace-Linux-x64.tar.gz` |
+| Platform | Binary Installer File | Format |
+|----------|----------------------|--------|
+| **macOS (Universal)** | `KivoWorkspace-macOS-Universal-1.1.0.dmg` | Merged drag-and-drop installer |
+| **macOS (Apple Silicon)** | `KivoWorkspace-macOS-Silicon-1.1.0.dmg` | Native arm64 drag-and-drop installer |
+| **macOS (Intel)** | `KivoWorkspace-macOS-Intel-1.1.0.dmg` | Native x86_64 drag-and-drop installer |
+| **Windows x64** | `KivoWorkspace-Windows-1.1.0.exe` | Standalone executable |
+| **Linux (Debian/Ubuntu)** | `KivoWorkspace-Linux-1.1.0.deb` | Debian Package installer |
+| **Linux (RedHat/Fedora)** | `KivoWorkspace-Linux-1.1.0.rpm` | RPM Package installer |
+| **Linux (Generic)** | `KivoWorkspace-Linux-1.1.0.AppImage` | Portable executable package |
 
 ---
 
@@ -151,6 +154,39 @@ cd KivoWorkspace
 # Windows: PowerShell equivalent
 .\setup.ps1
 ```
+
+### macOS Intel Self-Hosted CI Builder Setup
+
+The macOS Intel DMG is compiled on a local machine using GitHub's self-hosted runner program.
+
+#### 1. Setup & Configuration (First Time Only)
+1. In your GitHub repository, go to **Settings > Actions > Runners**.
+2. Click **New self-hosted runner** and select **macOS** as the runner platform.
+3. Follow the commands provided on the page to download, extract, and configure the runner package.
+4. Run the config script with your repository URL and token:
+   ```bash
+   ./config.sh --url https://github.com/thepriyanshumishra/KivoWorkspace --token <YOUR_RUNNER_TOKEN>
+   ```
+
+#### 2. Starting/Managing the Runner Program
+* **Foreground Mode** (runs in your current terminal session):
+  ```bash
+  ./run.sh
+  ```
+* **Background Service Mode** (runs continuously as a system daemon, highly recommended):
+  ```bash
+  # Install the background agent
+  ./svc.sh install
+  
+  # Start the runner service
+  ./svc.sh start
+  
+  # Check runner service status
+  ./svc.sh status
+  
+  # Stop the runner service
+  ./svc.sh stop
+  ```
 
 ---
 

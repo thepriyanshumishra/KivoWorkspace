@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../constants/app_constants.dart';
 
@@ -24,6 +25,9 @@ class UpdateService {
 
   /// Checks if a newer version is available on GitHub.
   Future<UpdateInfo> checkForUpdate() async {
+    if (kIsWeb) {
+      return UpdateInfo(latestVersion: '', downloadUrl: '', releaseNotes: '', hasUpdate: false);
+    }
     try {
       final response = await _client.get(
         Uri.parse('https://api.github.com/repos/thepriyanshumishra/KivoWorkspace/releases/latest'),

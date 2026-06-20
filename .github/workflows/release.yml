@@ -6,17 +6,16 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      run_id:
-        description: 'Previous Run ID to download backend artifacts'
-        required: false
-        default: ''
       version:
-        description: 'Release version (e.g., v1.0.2)'
+        description: 'Release version (e.g., 1.1.0)'
         required: false
-        default: ''
+        default: '1.1.0'
 
 permissions:
   contents: write
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
 
 jobs:
 
@@ -26,23 +25,23 @@ jobs:
   build-web:
     name: Flutter Web Assets
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
+      - name: Normalize Release Version
+        shell: bash
+        run: |
+          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: '3.32.x'
+          cache: true
 
       - name: Flutter pub get
         run: |
@@ -52,46 +51,51 @@ jobs:
       - name: Build Flutter Web App
         run: |
           cd frontend
-          flutter build web --release
+          flutter build web --release --web-renderer canvaskit
 
       - name: Upload Web Assets Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kivo_web_assets
           path: frontend/build/web/
+          retention-days: 1
 
   # ============================================================
-  # JOB 1 · Windows → KivoWorkspace-Windows.exe
+  # JOB 1 · Windows → KivoWorkspace-Windows.exe (Standalone EXE)
   # ============================================================
   build-windows:
-    name: Windows (.exe)
+    name: Windows EXE
     runs-on: windows-2022
     needs: [build-web]
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
+      - name: Normalize Release Version
+        shell: bash
+        run: |
+          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.32.x'
-
-      - name: Enable Windows desktop
-        run: flutter config --enable-windows-desktop
+      - name: Clean old build files
+        shell: bash
+        run: |
+          rm -rf backend/build backend/dist backend/web
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements_ci.txt'
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: backend/web
 
       - name: Install backend dependencies & PyInstaller
         shell: pwsh
@@ -101,103 +105,64 @@ jobs:
           python -m pip install -r requirements_ci.txt
           python -m pip install pyinstaller
 
-      - name: Build backend (Windows x64)
+      - name: Build backend with PyInstaller (Windows x64)
         shell: pwsh
         run: |
           cd backend
-          pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+          pyinstaller --noconfirm --onefile --noconsole --name "KivoWorkspace" --add-data "web;web" main.py
 
-      - name: Flutter pub get
-        run: |
-          cd frontend
-          flutter pub get
-
-      - name: Build Flutter Windows app
+      - name: Rename executable
         shell: pwsh
         run: |
-          cd frontend
-          flutter build windows --release
-
-      - name: Copy backend into Flutter release bundle
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path "frontend\build\windows\x64\runner\Release\bin" -Force
-          Copy-Item -Path "backend\dist\kivo_backend" `
-                    -Destination "frontend\build\windows\x64\runner\Release\bin\" `
-                    -Recurse -Force
-
-      - name: Download Web Assets Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kivo_web_assets
-          path: web
-
-      - name: Copy Web assets into backend folder
-        shell: pwsh
-        run: |
-          Copy-Item -Path "web" `
-                    -Destination "frontend\build\windows\x64\runner\Release\bin\kivo_backend\" `
-                    -Recurse -Force
-
-      - name: Build installer with Inno Setup
-        shell: pwsh
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "frontend\windows\installer.iss"
-
-      - name: Rename installer to release filename
-        shell: pwsh
-        run: |
-          Copy-Item "frontend\build\windows\KivoWorkspace-Setup.exe" `
-                    "KivoWorkspace-Windows-${{ github.ref_name }}.exe" -Force
+          Move-Item -Path "backend/dist/KivoWorkspace.exe" -Destination "KivoWorkspace-Windows-${{ env.VERSION }}.exe"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-Windows-${{ github.ref_name }}.exe
+          files: KivoWorkspace-Windows-${{ env.VERSION }}.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
-  # JOB 2 · Linux → .deb  .rpm  .AppImage
+  # JOB 2 · Linux → DEB, RPM, AppImage Packages
   # ============================================================
   build-linux:
-    name: Linux (.deb/ .rpm/ .appimage)
+    name: Linux Packages
     runs-on: ubuntu-latest
     needs: [build-web]
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.32.x'
-
-      - name: Enable Linux desktop & install system dependencies
+      - name: Normalize Release Version
+        shell: bash
         run: |
-          flutter config --enable-linux-desktop
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev \
-            alien wget rpm
+          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
+
+      - name: Clean old build files
+        shell: bash
+        run: |
+          rm -rf backend/build backend/dist backend/web
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements_ci.txt'
+
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: backend/web
 
       - name: Install backend dependencies & PyInstaller
         run: |
@@ -207,409 +172,325 @@ jobs:
           .venv/bin/pip install -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
-      - name: Build backend (Linux x86_64)
+      - name: Build backend with PyInstaller (Linux x86_64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_workspace" --add-data "web:web" main.py
 
-      - name: Flutter pub get
+      - name: Package Debian (.deb)
         run: |
-          cd frontend
-          flutter pub get
+          rm -rf debian
+          mkdir -p debian/DEBIAN
+          mkdir -p debian/usr/bin
+          mkdir -p debian/usr/share/kivoworkspace
+          
+          # Copy compiled files
+          cp -r backend/dist/kivo_workspace/* debian/usr/share/kivoworkspace/
+          
+          # Create launch script
+          cat << 'EOF' > debian/usr/bin/kivoworkspace
+#!/bin/bash
+exec /usr/share/kivoworkspace/kivo_workspace "$@"
+EOF
+          chmod +x debian/usr/bin/kivoworkspace
+          
+          # Create control file
+          cat << EOF > debian/DEBIAN/control
+Package: kivoworkspace
+Version: ${{ env.VERSION }}
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Priyanshu Mishra <priyanshu@kivo.ai>
+Description: Kivo Workspace Desktop Assistant
+EOF
+          
+          dpkg-deb --build debian KivoWorkspace-Linux-${{ env.VERSION }}.deb
 
-      - name: Build Flutter Linux app
+      - name: Package RedHat (.rpm)
         run: |
-          cd frontend
-          flutter build linux --release
+          sudo apt-get update && sudo apt-get install -y alien rpm
+          sudo alien --to-rpm --scripts KivoWorkspace-Linux-${{ env.VERSION }}.deb
+          # Rename the generated rpm (normally named kivoworkspace-version.rpm) to standard release name
+          mv *.rpm KivoWorkspace-Linux-${{ env.VERSION }}.rpm
 
-      - name: Copy backend into Flutter release bundle
+      - name: Package AppImage (.AppImage)
         run: |
-          mkdir -p frontend/build/linux/x64/release/bundle/bin
-          cp -R backend/dist/kivo_backend frontend/build/linux/x64/release/bundle/bin/
-
-      - name: Download Web Assets Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kivo_web_assets
-          path: web
-
-      - name: Copy Web assets into backend folder
-        run: |
-          cp -R web frontend/build/linux/x64/release/bundle/bin/kivo_backend/
-
-      - name: Build .deb package
-        run: |
-          BUNDLE="frontend/build/linux/x64/release/bundle"
-          PKG="deb_staging"
-          mkdir -p "$PKG/DEBIAN" "$PKG/usr/share/kivo-workspace" "$PKG/usr/bin" "$PKG/usr/share/applications" "$PKG/usr/share/pixmaps"
-          cp -R "$BUNDLE/." "$PKG/usr/share/kivo-workspace/"
-          printf '#!/bin/sh\nexec /usr/share/kivo-workspace/kivo_workspace "$@"\n' > "$PKG/usr/bin/kivo-workspace"
-          chmod +x "$PKG/usr/bin/kivo-workspace"
-          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Kivo Workspace\nComment=Edge-first AI Knowledge Workspace\nExec=/usr/bin/kivo-workspace\nIcon=kivo-workspace\nCategories=Utility;\nTerminal=false\n' > "$PKG/usr/share/applications/kivo-workspace.desktop"
-          cp frontend/assets/images/app_logo.png "$PKG/usr/share/pixmaps/kivo-workspace.png"
-          printf 'Package: kivo-workspace\nVersion: 1.0.0\nSection: utils\nPriority: optional\nArchitecture: amd64\nMaintainer: Kivo <support@kivo.com>\nDescription: Edge-first AI Knowledge Workspace\n An intelligent workspace that runs entirely on-device.\n' > "$PKG/DEBIAN/control"
-          dpkg-deb --build "$PKG" KivoWorkspace-Linux-${{ github.ref_name }}.deb
-
-      - name: Build .rpm package (via alien)
-        run: |
-          sudo alien --to-rpm --scripts KivoWorkspace-Linux-${{ github.ref_name }}.deb
-          RPM_FILE=$(ls kivo-workspace*.rpm 2>/dev/null | head -1)
-          if [ -z "$RPM_FILE" ]; then echo "ERROR: .rpm not found" && exit 1; fi
-          mv "$RPM_FILE" KivoWorkspace-Linux-${{ github.ref_name }}.rpm
-
-      - name: Build .AppImage
-        run: |
-          BUNDLE="frontend/build/linux/x64/release/bundle"
-          APPDIR="AppDir"
-          mkdir -p "$APPDIR"
-          cp -R "$BUNDLE/." "$APPDIR/"
-          printf '#!/bin/sh\nSELF=$(readlink -f "$0")\nHERE=$(dirname "$SELF")\nexec "$HERE/kivo_workspace" "$@"\n' > "$APPDIR/AppRun"
-          chmod +x "$APPDIR/AppRun"
-          printf '[Desktop Entry]\nVersion=1.0\nType=Application\nName=Kivo Workspace\nComment=Edge-first AI Knowledge Workspace\nExec=AppRun\nIcon=kivo-workspace\nCategories=Utility;\nTerminal=false\n' > "$APPDIR/kivo-workspace.desktop"
-          cp frontend/assets/images/app_logo.png "$APPDIR/kivo-workspace.png"
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
-          chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run "$APPDIR" KivoWorkspace-Linux-${{ github.ref_name }}.AppImage
+          rm -rf AppDir
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          
+          # Copy compiled files to AppDir
+          cp -r backend/dist/kivo_workspace/* AppDir/usr/bin/
+          
+          # Create AppRun entrypoint
+          cat << 'EOF' > AppDir/AppRun
+#!/bin/sh
+SELF=$(readlink -f "$0")
+HERE=$(dirname "$SELF")
+exec "$HERE/usr/bin/kivo_workspace" "$@"
+EOF
+          chmod +x AppDir/AppRun
+          
+          # Create Desktop file
+          cat << 'EOF' > AppDir/kivoworkspace.desktop
+[Desktop Entry]
+Name=Kivo Workspace
+Exec=kivo_workspace
+Icon=kivoworkspace
+Type=Application
+Categories=Utility;
+EOF
+          
+          # Use favicon or dummy logo for icon
+          cp backend/web/favicon.png AppDir/kivoworkspace.png || touch AppDir/kivoworkspace.png
+          
+          # Download appimagetool
+          curl -L -o appimagetool-x86_64.AppImage https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir KivoWorkspace-Linux-${{ env.VERSION }}.AppImage
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            KivoWorkspace-Linux-${{ github.ref_name }}.deb
-            KivoWorkspace-Linux-${{ github.ref_name }}.rpm
-            KivoWorkspace-Linux-${{ github.ref_name }}.AppImage
+            KivoWorkspace-Linux-${{ env.VERSION }}.deb
+            KivoWorkspace-Linux-${{ env.VERSION }}.rpm
+            KivoWorkspace-Linux-${{ env.VERSION }}.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
-  # JOB 3 · macOS Silicon → KivoWorkspace-macOS-Silicon.dmg
+  # JOB 3 · macOS Silicon → Build & Zip Bundle (arm64)
   # ============================================================
   build-macos-silicon:
-    name: macOS Silicon
+    name: macOS Silicon Build
     runs-on: macos-14
     needs: [build-web]
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
+      - name: Normalize Release Version
+        shell: bash
+        run: |
+          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.32.x'
-
-      - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
+      - name: Clean old build files
+        run: |
+          rm -rf backend/build backend/dist backend/web macos_silicon_app.zip
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements_ci.txt'
 
-      - name: Install backend dependencies & PyInstaller (arm64)
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: backend/web
+
+      - name: Install backend dependencies & PyInstaller
         run: |
           cd backend
+          rm -rf .venv
           python3 -m venv .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
-      - name: Build backend with PyInstaller (arm64)
+      - name: Build backend with PyInstaller (Silicon arm64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_workspace" --add-data "web:web" main.py
+          mv dist/kivo_workspace.app dist/Kivo\ Workspace.app
 
-      - name: Upload Silicon Backend Artifact
+      - name: Re-sign app bundle (Ad-hoc)
+        run: |
+          codesign --force --deep --sign - "backend/dist/Kivo Workspace.app"
+
+      - name: Zip Bundle (Preserving symlinks/permissions)
+        run: |
+          cd backend/dist
+          zip -q -r -y ../../macos_silicon_app.zip "Kivo Workspace.app"
+
+      - name: Upload Silicon App Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kivo_backend_silicon
-          path: backend/dist/kivo_backend/
-
-      - name: Flutter pub get
-        run: |
-          cd frontend
-          flutter pub get
-
-      - name: Build Flutter macOS app
-        run: |
-          cd frontend
-          flutter build macos --release
-
-      - name: Thin Flutter executable to arm64
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          lipo -thin arm64 "$APP/Contents/MacOS/Kivo Workspace" -output "$APP/Contents/MacOS/Kivo Workspace"
-
-      - name: Embed backend into app bundle
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          mkdir -p "$APP/Contents/Resources/bin"
-          cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
-
-      - name: Download Web Assets Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kivo_web_assets
-          path: web
-
-      - name: Copy Web assets into backend folder
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          cp -R web "$APP/Contents/Resources/bin/kivo_backend/"
-
-      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          codesign --force --deep --sign - "$APP"
-
-      - name: Create Silicon DMG
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          STAGING="dmg_staging_silicon"
-          mkdir -p "$STAGING"
-          cp -R "$APP" "$STAGING/"
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create \
-            -fs HFS+ \
-            -srcfolder "$STAGING" \
-            -volname "Kivo Workspace" \
-            -format UDZO \
-            KivoWorkspace-macOS-Silicon-${{ github.ref_name }}.dmg
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          prerelease: false
-          fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Silicon-${{ github.ref_name }}.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: macos_silicon_zip
+          path: macos_silicon_app.zip
+          retention-days: 1
 
   # ============================================================
-  # JOB 4 · macOS Intel → KivoWorkspace-macOS-Intel.dmg
+  # JOB 4 · macOS Intel → Build & Zip Bundle (x86_64 Self-Hosted)
   # ============================================================
   build-macos-intel:
-    name: macOS Intel
-    runs-on: [self-hosted, macos, x64]
+    name: macOS Intel Build (Self-Hosted)
+    runs-on: self-hosted
     needs: [build-web]
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
+      - name: Normalize Release Version
+        shell: bash
+        run: |
+          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.32.x'
+      - name: Clean old build files
+        run: |
+          rm -rf backend/build backend/dist backend/web macos_intel_app.zip
 
-      - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
+      - name: Download Web Assets Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kivo_web_assets
+          path: backend/web
 
       - name: Install backend dependencies & PyInstaller
         run: |
           cd backend
-          python3.12 -m venv .venv
+          rm -rf .venv
+          python3 -m venv .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
-      - name: Build backend with PyInstaller
+      - name: Build backend with PyInstaller (Intel x86_64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_backend" main.py
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_workspace" --add-data "web:web" main.py
+          mv dist/kivo_workspace.app dist/Kivo\ Workspace.app
 
-      - name: Upload Intel Backend Artifact
+      - name: Re-sign app bundle (Ad-hoc)
+        run: |
+          codesign --force --deep --sign - "backend/dist/Kivo Workspace.app"
+
+      - name: Zip Bundle (Preserving symlinks/permissions)
+        run: |
+          cd backend/dist
+          zip -q -r -y ../../macos_intel_app.zip "Kivo Workspace.app"
+
+      - name: Upload Intel App Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kivo_backend_intel
-          path: backend/dist/kivo_backend/
-
-      - name: Flutter pub get
-        run: |
-          cd frontend
-          flutter pub get
-
-      - name: Build Flutter macOS app
-        run: |
-          cd frontend
-          flutter build macos --release
-
-      - name: Thin Flutter executable to x86_64
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          lipo -thin x86_64 "$APP/Contents/MacOS/Kivo Workspace" -output "$APP/Contents/MacOS/Kivo Workspace"
-
-      - name: Embed backend into app bundle
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          mkdir -p "$APP/Contents/Resources/bin"
-          cp -R backend/dist/kivo_backend "$APP/Contents/Resources/bin/"
-
-      - name: Download Web Assets Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kivo_web_assets
-          path: web
-
-      - name: Copy Web assets into backend folder
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          cp -R web "$APP/Contents/Resources/bin/kivo_backend/"
-
-      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          codesign --force --deep --sign - "$APP"
-
-      - name: Create Intel DMG
-        run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          STAGING="dmg_staging_intel"
-          mkdir -p "$STAGING"
-          cp -R "$APP" "$STAGING/"
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create \
-            -fs HFS+ \
-            -srcfolder "$STAGING" \
-            -volname "Kivo Workspace" \
-            -format UDZO \
-            KivoWorkspace-macOS-Intel-${{ github.ref_name }}.dmg
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          prerelease: false
-          fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Intel-${{ github.ref_name }}.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: macos_intel_zip
+          path: macos_intel_app.zip
+          retention-days: 1
 
   # ============================================================
-  # JOB 5 · macOS Universal → KivoWorkspace-macOS-Universal.dmg
+  # JOB 5 · macOS Merge & Pack → Intel, Silicon, Universal DMGs
   # ============================================================
-  build-macos-universal:
-    name: macOS Universal
+  pack-macos:
+    name: macOS Packaging & Universal Merge
     runs-on: macos-14
-    needs: [build-web, build-macos-silicon, build-macos-intel]
-    if: always() && !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.build-web.result == 'success' && needs.build-macos-silicon.result == 'success' && needs.build-macos-intel.result == 'success'))
-    env:
-      RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    needs: [build-macos-silicon, build-macos-intel]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: zulu
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          flutter-version: '3.32.x'
-
-      - name: Enable macOS desktop
-        run: flutter config --enable-macos-desktop
-
-      - name: Flutter pub get
+      - name: Normalize Release Version
+        shell: bash
         run: |
-          cd frontend
-          flutter pub get
+          RAW_VER="${{ github.event.inputs.version || github.ref_name }}"
+          CLEAN_VER="${RAW_VER#v}"
+          echo "VERSION=${CLEAN_VER}" >> $GITHUB_ENV
 
-      - name: Build Flutter macOS app
-        run: |
-          cd frontend
-          flutter build macos --release
-
-      - name: Download Silicon Backend Artifact
-        if: github.event_name == 'push'
+      - name: Download Silicon App Artifact
         uses: actions/download-artifact@v4
         with:
-          name: kivo_backend_silicon
-          path: silicon_backend
+          name: macos_silicon_zip
 
-      - name: Download Intel Backend Artifact
-        if: github.event_name == 'push'
+      - name: Download Intel App Artifact
         uses: actions/download-artifact@v4
         with:
-          name: kivo_backend_intel
-          path: intel_backend
+          name: macos_intel_zip
 
-      - name: Download Web Assets Artifact
-        if: github.event_name == 'push'
-        uses: actions/download-artifact@v4
-        with:
-          name: kivo_web_assets
-          path: web
-
-      - name: Download Artifacts for Manual Dispatch
-        if: github.event_name == 'workflow_dispatch'
+      - name: Unzip Apps
         run: |
-          gh run download ${{ github.event.inputs.run_id }} -n kivo_backend_silicon -d silicon_backend
-          gh run download ${{ github.event.inputs.run_id }} -n kivo_backend_intel -d intel_backend
-          gh run download ${{ github.event.inputs.run_id }} -n kivo_web_assets -d web
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          rm -rf silicon intel "Kivo Workspace.app"
+          unzip -q macos_silicon_zip/macos_silicon_app.zip -d silicon
+          unzip -q macos_intel_zip/macos_intel_app.zip -d intel
 
-      - name: Embed both backends into app bundle
+      - name: Merge into Universal App Bundle
         run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          mkdir -p "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend"
-          mkdir -p "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend"
-          cp -R silicon_backend/. "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
-          cp -R intel_backend/. "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
-          cp -R web "$APP/Contents/Resources/bin/kivo_backend_silicon/kivo_backend/"
-          cp -R web "$APP/Contents/Resources/bin/kivo_backend_intel/kivo_backend/"
+          # Copy the Silicon app structure as a template
+          rm -rf "Kivo Workspace.app"
+          cp -R silicon/Kivo\ Workspace.app Kivo\ Workspace.app
+          
+          # Find all Mach-O files in Silicon app and merge with Intel counterpart
+          find "Kivo Workspace.app" -type f | while read -r file; do
+            rel_path="${file#Kivo Workspace.app/}"
+            intel_file="intel/Kivo Workspace.app/$rel_path"
+            if [ -f "$intel_file" ]; then
+              file_type=$(file -b "$file")
+              if [[ "$file_type" == *"Mach-O"* ]]; then
+                echo "Lipo merging: $rel_path"
+                mv "$file" "${file}.tmp"
+                lipo -create "${file}.tmp" "$intel_file" -output "$file" || (echo "Failed to lipo merge $rel_path, fallback to silicon version"; cp "${file}.tmp" "$file")
+                rm -f "${file}.tmp"
+              fi
+            fi
+          done
 
-      - name: Re-sign app bundle (fixes macOS Gatekeeper "damaged" error)
+      - name: Re-sign App Bundles (Ad-hoc)
         run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          codesign --force --deep --sign - "$APP"
+          codesign --force --deep --sign - "silicon/Kivo Workspace.app"
+          codesign --force --deep --sign - "intel/Kivo Workspace.app"
+          codesign --force --deep --sign - "Kivo Workspace.app"
 
-      - name: Create Universal DMG
+      - name: Create DMG - macOS Intel
         run: |
-          APP="frontend/build/macos/Build/Products/Release/Kivo Workspace.app"
-          STAGING="dmg_staging_universal"
-          mkdir -p "$STAGING"
-          cp -R "$APP" "$STAGING/"
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create \
-            -fs HFS+ \
-            -srcfolder "$STAGING" \
-            -volname "Kivo Workspace" \
-            -format UDZO \
-            KivoWorkspace-macOS-Universal-${{ env.RELEASE_VERSION }}.dmg
+          rm -rf staging_intel KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
+          mkdir -p staging_intel
+          cp -R intel/Kivo\ Workspace.app staging_intel/Kivo\ Workspace.app
+          ln -s /Applications staging_intel/Applications
+          hdiutil create -fs HFS+ -srcfolder staging_intel -volname "Kivo Workspace Intel" -format UDZO KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
+          rm -rf staging_intel
+
+      - name: Create DMG - macOS Silicon
+        run: |
+          rm -rf staging_silicon KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
+          mkdir -p staging_silicon
+          cp -R silicon/Kivo\ Workspace.app staging_silicon/Kivo\ Workspace.app
+          ln -s /Applications staging_silicon/Applications
+          hdiutil create -fs HFS+ -srcfolder staging_silicon -volname "Kivo Workspace Silicon" -format UDZO KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
+          rm -rf staging_silicon
+
+      - name: Create DMG - macOS Universal
+        run: |
+          rm -rf staging_universal KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
+          mkdir -p staging_universal
+          cp -R Kivo\ Workspace.app staging_universal/Kivo\ Workspace.app
+          ln -s /Applications staging_universal/Applications
+          hdiutil create -fs HFS+ -srcfolder staging_universal -volname "Kivo Workspace" -format UDZO KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
+          rm -rf staging_universal
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
           draft: true
           prerelease: false
           fail_on_unmatched_files: true
-          files: KivoWorkspace-macOS-Universal-${{ env.RELEASE_VERSION }}.dmg
+          files: |
+            KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
+            KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
+            KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

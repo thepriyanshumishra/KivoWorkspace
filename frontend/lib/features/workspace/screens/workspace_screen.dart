@@ -46,6 +46,21 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
         _isInputFocused = _focusNode.hasFocus;
       });
     });
+    _focusNode.onKeyEvent = (node, event) {
+      final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter;
+      final isShift = HardwareKeyboard.instance.isShiftPressed ||
+          HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+          HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight);
+
+      if (isEnter && !isShift) {
+        if (event is KeyDownEvent) {
+          _sendMessage();
+        }
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
   }
 
   Future<void> _loadModels() async {
@@ -1355,10 +1370,18 @@ class _WorkspaceScreenState extends ConsumerState<WorkspaceScreen> {
                               ),
                               const SizedBox(width: 8),
                               IconButton(
-                                icon: Icon(Icons.arrow_upward_rounded, size: 16, color: hasReadySources ? colors.primary : colors.textMuted),
-                                onPressed: hasReadySources ? _sendMessage : null,
+                                icon: chatState.isStreaming
+                                    ? const Icon(Icons.stop_rounded, size: 16, color: Colors.white)
+                                    : Icon(Icons.arrow_upward_rounded, size: 16, color: hasReadySources ? colors.primary : colors.textMuted),
+                                onPressed: chatState.isStreaming
+                                    ? () {
+                                        ref.read(chatProvider(widget.workspaceId).notifier).stopAddressing();
+                                      }
+                                    : (hasReadySources ? _sendMessage : null),
                                 style: IconButton.styleFrom(
-                                  backgroundColor: hasReadySources ? colors.primary.withValues(alpha: 0.1) : Colors.transparent,
+                                  backgroundColor: chatState.isStreaming
+                                      ? colors.statusFailed
+                                      : (hasReadySources ? colors.primary.withValues(alpha: 0.1) : Colors.transparent),
                                 ),
                               ),
                             ],

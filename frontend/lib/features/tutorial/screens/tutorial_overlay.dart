@@ -46,18 +46,27 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       _calculateCutout();
     });
   }
-
   void _calculateCutout() {
     if (!mounted) return;
     
-    final context = widget.targetKey.currentContext;
-    if (context == null) return;
+    final targetContext = widget.targetKey.currentContext;
+    if (targetContext == null) return;
 
-    final RenderBox? box = context.findRenderObject() as RenderBox?;
+    final RenderBox? box = targetContext.findRenderObject() as RenderBox?;
     if (box == null) return;
 
+    final RenderBox? overlayBox = context.findRenderObject() as RenderBox?;
+    if (overlayBox == null) return;
+
     final size = box.size;
-    final position = box.localToGlobal(Offset.zero);
+    
+    // Convert target local position to overlay local position instead of global position
+    Offset position;
+    try {
+      position = box.localToGlobal(Offset.zero, ancestor: overlayBox);
+    } catch (_) {
+      position = box.localToGlobal(Offset.zero);
+    }
 
     setState(() {
       // Add padding around highlighted widget
@@ -69,7 +78,6 @@ class _TutorialOverlayState extends State<TutorialOverlay> {
       );
     });
   }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;

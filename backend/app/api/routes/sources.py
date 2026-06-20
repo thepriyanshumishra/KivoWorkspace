@@ -68,7 +68,7 @@ def update_workspace_sources_count(workspace_id: str, count: int):
         logger.error(f"Failed to update workspace sources count for {workspace_id}: {e}")
 
 @router.get("", response_model=List[Source])
-def list_sources(workspace_id: str = Path(..., description="The unique workspace ID")):
+def list_sources(workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID")):
     """List all sources attached to the workspace."""
     workspace_dir = get_workspace_dir(workspace_id)
     if not workspace_dir.exists():
@@ -77,7 +77,7 @@ def list_sources(workspace_id: str = Path(..., description="The unique workspace
 
 @router.post("/upload", response_model=List[Source])
 async def upload_sources(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     files: List[UploadFile] = File(...)
 ):
     """Upload one or more files (PDF, Image, Audio) to the workspace."""
@@ -178,7 +178,7 @@ def get_website_title(url: str, default_domain: str) -> str:
 
 @router.post("/youtube", response_model=Source)
 def add_youtube_source(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     payload: YouTubeCreate = Body(...)
 ):
     """Add a YouTube URL as a source for the workspace."""
@@ -227,7 +227,7 @@ def add_youtube_source(
 
 @router.post("/website", response_model=Source)
 def add_website_source(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     payload: WebsiteCreate = Body(...)
 ):
     """Add a website URL as a source for the workspace."""
@@ -274,7 +274,7 @@ def add_website_source(
 
 @router.post("/text", response_model=Source)
 def add_text_source(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     payload: TextCreate = Body(...)
 ):
     """Add pasted text as a source for the workspace."""
@@ -327,7 +327,7 @@ def add_text_source(
 
 @router.post("/email", response_model=Source)
 def add_email_source(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     payload: EmailCreate = Body(...)
 ):
     """Add pasted email content as a source for the workspace."""
@@ -383,9 +383,9 @@ def add_email_source(
 
 @router.delete("/{source_id}")
 def delete_source(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
 
-    source_id: str = Path(..., description="The unique source ID")
+    source_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique source ID")
 ):
     """Delete a source from the workspace."""
     workspace_dir = get_workspace_dir(workspace_id)

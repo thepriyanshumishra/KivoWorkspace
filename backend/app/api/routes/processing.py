@@ -313,7 +313,7 @@ def run_processing_pipeline(workspace_id: str, steps: List[str], cancel_event: t
 
 @router.post("/process", response_model=ProcessingStatusResponse)
 def start_processing(
-    workspace_id: str = Path(..., description="The unique workspace ID"),
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID"),
     chunk_size: Optional[int] = None,
     chunk_overlap: Optional[int] = None
 ):
@@ -397,7 +397,7 @@ def start_processing(
     )
 
 @router.get("/processing-status", response_model=ProcessingStatusResponse)
-def get_processing_status(workspace_id: str = Path(..., description="The unique workspace ID")):
+def get_processing_status(workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID")):
     """Get current progress status of the processing pipeline."""
     workspace_dir = get_workspace_dir(workspace_id)
     if not workspace_dir.exists():
@@ -432,7 +432,7 @@ def get_processing_status(workspace_id: str = Path(..., description="The unique 
     )
 
 @router.post("/cancel-processing")
-def cancel_processing(workspace_id: str = Path(..., description="The unique workspace ID")):
+def cancel_processing(workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The unique workspace ID")):
     """Cancel active processing queue."""
     workspace_dir = get_workspace_dir(workspace_id)
     if not workspace_dir.exists():

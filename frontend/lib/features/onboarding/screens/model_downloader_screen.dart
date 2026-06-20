@@ -477,7 +477,6 @@ class _ModelDownloaderScreenState extends ConsumerState<ModelDownloaderScreen> {
   @override
   Widget build(BuildContext context) {
     final colors = context.colors;
-    final progress = ref.watch(onboardingProvider);
 
     // --- RAM-based recommendation logic ---
     int getRamBucket(int ramGb) {
@@ -497,9 +496,9 @@ class _ModelDownloaderScreenState extends ConsumerState<ModelDownloaderScreen> {
       return [lowerLevels[lowerLevels.length - 2], lowerLevels[lowerLevels.length - 1]];
     }
 
-    final ramString = progress.systemSpecs['ramValue'] ?? '8.0';
-    final systemRamGb = double.tryParse(ramString) ?? 8.0;
-    final hasGPU = progress.systemSpecs['gpuValue'] == 'true';
+    // Default to 8 GB — systemSpecs no longer tracked (all dependencies are bundled)
+    const systemRamGb = 8.0;
+    const hasGPU = false;
     final allowedBuckets = getRecommendedRamBuckets(systemRamGb);
 
     // Build recommended: 2 models from each of 3 key categories, matching system RAM

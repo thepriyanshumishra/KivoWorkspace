@@ -13,8 +13,8 @@ logger = logging.getLogger("kivo.chat")
 router = APIRouter()
 
 @router.post("", response_model=ChatResponse)
-def query_workspace(
-    workspace_id: str = Path(..., description="The workspace ID"),
+async def query_workspace(
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The workspace ID"),
     payload: ChatRequest = None
 ):
     """
@@ -24,7 +24,7 @@ def query_workspace(
     logger.info(f"Received query for workspace {workspace_id}: '{payload.message}'")
     try:
         model_to_use = payload.model_name if payload.model_name else settings.ollama_default_model
-        res = retrieve_and_generate(
+        res = await retrieve_and_generate(
             workspace_id=workspace_id,
             question=payload.message,
             model_name=model_to_use,
@@ -51,8 +51,8 @@ def query_workspace(
         raise HTTPException(status_code=500, detail="An internal error occurred while processing your query. Please try again.")
 
 @router.post("/stream")
-def query_workspace_stream(
-    workspace_id: str = Path(..., description="The workspace ID"),
+async def query_workspace_stream(
+    workspace_id: str = Path(..., regex=r"^[0-9a-f-]{36}$", description="The workspace ID"),
     payload: ChatRequest = None
 ):
     """

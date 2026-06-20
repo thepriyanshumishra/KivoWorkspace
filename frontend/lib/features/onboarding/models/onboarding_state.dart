@@ -2,13 +2,11 @@
 // Purpose: Models representing stages, model registry, and progress for Kivo Workspace onboarding.
 
 enum OnboardingStage {
-  systemCheck,
+  welcome,
   modelSelection,
   summary,
   downloading,
-  installing,
-  configurations,
-  appearance,
+  customization,
   done,
 }
 
@@ -47,40 +45,34 @@ class CuratedModel {
 class OnboardingProgress {
   final OnboardingStage activeStage;
   final List<String> selectedModelIds;
-  final double downloadSpeed; // MB/s
-  final String downloadEta;
+  final double downloadSpeed; // MB/s (real-time, from actual pull)
+  final String downloadEta;  // Calculated from sliding avg speed
   final double downloadProgress; // 0.0 to 1.0
   final double downloadedMb;
   final double totalMb;
   final String? errorMessage;
   final bool isInternetConnected;
-  final Map<String, String> systemSpecs;
-  final Map<String, String> installStatus; // modelId/binary -> status string (e.g. "Downloading", "Completed")
-  final bool isFfmpegInstalled;
-  final bool isTesseractInstalled;
-  final bool isPythonInstalled;
-  final bool isEmbeddingModelInstalled;
+  final Map<String, String> installStatus; // modelId -> status string
   final bool isOllamaInstalled;
   final List<String> installedOllamaModels;
+  final bool isDownloading;
+  final bool downloadCancelled;
 
   OnboardingProgress({
-    this.activeStage = OnboardingStage.systemCheck,
+    this.activeStage = OnboardingStage.welcome,
     this.selectedModelIds = const ['qwen2.5:1.5b'],
     this.downloadSpeed = 0.0,
-    this.downloadEta = 'Unknown',
+    this.downloadEta = 'Calculating...',
     this.downloadProgress = 0.0,
     this.downloadedMb = 0.0,
     this.totalMb = 0.0,
     this.errorMessage,
     this.isInternetConnected = true,
-    this.systemSpecs = const {},
     this.installStatus = const {},
-    this.isFfmpegInstalled = false,
-    this.isTesseractInstalled = false,
-    this.isPythonInstalled = false,
-    this.isEmbeddingModelInstalled = false,
     this.isOllamaInstalled = false,
     this.installedOllamaModels = const [],
+    this.isDownloading = false,
+    this.downloadCancelled = false,
   });
 
   OnboardingProgress copyWith({
@@ -93,14 +85,11 @@ class OnboardingProgress {
     double? totalMb,
     String? errorMessage,
     bool? isInternetConnected,
-    Map<String, String>? systemSpecs,
     Map<String, String>? installStatus,
-    bool? isFfmpegInstalled,
-    bool? isTesseractInstalled,
-    bool? isPythonInstalled,
-    bool? isEmbeddingModelInstalled,
     bool? isOllamaInstalled,
     List<String>? installedOllamaModels,
+    bool? isDownloading,
+    bool? downloadCancelled,
   }) {
     return OnboardingProgress(
       activeStage: activeStage ?? this.activeStage,
@@ -112,14 +101,11 @@ class OnboardingProgress {
       totalMb: totalMb ?? this.totalMb,
       errorMessage: errorMessage,
       isInternetConnected: isInternetConnected ?? this.isInternetConnected,
-      systemSpecs: systemSpecs ?? this.systemSpecs,
       installStatus: installStatus ?? this.installStatus,
-      isFfmpegInstalled: isFfmpegInstalled ?? this.isFfmpegInstalled,
-      isTesseractInstalled: isTesseractInstalled ?? this.isTesseractInstalled,
-      isPythonInstalled: isPythonInstalled ?? this.isPythonInstalled,
-      isEmbeddingModelInstalled: isEmbeddingModelInstalled ?? this.isEmbeddingModelInstalled,
       isOllamaInstalled: isOllamaInstalled ?? this.isOllamaInstalled,
       installedOllamaModels: installedOllamaModels ?? this.installedOllamaModels,
+      isDownloading: isDownloading ?? this.isDownloading,
+      downloadCancelled: downloadCancelled ?? this.downloadCancelled,
     );
   }
 }

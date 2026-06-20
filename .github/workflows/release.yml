@@ -120,7 +120,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          draft: true
+          draft: false
           prerelease: false
           fail_on_unmatched_files: true
           files: KivoWorkspace-Windows-${{ env.VERSION }}.exe
@@ -247,7 +247,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          draft: true
+          draft: false
           prerelease: false
           fail_on_unmatched_files: true
           files: |
@@ -480,7 +480,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          draft: true
+          draft: false
           prerelease: false
           fail_on_unmatched_files: true
           files: |

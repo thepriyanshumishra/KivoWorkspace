@@ -109,7 +109,11 @@ jobs:
         shell: pwsh
         run: |
           cd backend
-          pyinstaller --noconfirm --onefile --noconsole --name "KivoWorkspace" --add-data "web;web" main.py
+          pyinstaller --noconfirm --onefile --noconsole `
+            --name "KivoWorkspace" `
+            --add-data "web;web" `
+            --icon "..\frontend\windows\runner\resources\app_icon.ico" `
+            main.py
 
       - name: Rename executable
         shell: pwsh
@@ -175,7 +179,10 @@ jobs:
       - name: Build backend with PyInstaller (Linux x86_64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_workspace" --add-data "web:web" main.py
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole \
+            --name "kivo_workspace" \
+            --add-data "web:web" \
+            main.py
 
       - name: Package Debian (.deb)
         run: |
@@ -235,8 +242,9 @@ jobs:
           echo 'Type=Application' >> AppDir/kivoworkspace.desktop
           echo 'Categories=Utility;' >> AppDir/kivoworkspace.desktop
           
-          # Use favicon or dummy logo for icon
-          cp backend/web/favicon.png AppDir/kivoworkspace.png || touch AppDir/kivoworkspace.png
+          # Use proper 256x256 app icon (not tiny favicon)
+          cp frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png AppDir/kivoworkspace.png || \
+            cp backend/web/favicon.png AppDir/kivoworkspace.png || touch AppDir/kivoworkspace.png
           
           # Download appimagetool
           curl -L -o appimagetool-x86_64.AppImage https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -302,10 +310,35 @@ jobs:
           .venv/bin/pip install --prefer-binary -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
+      - name: Generate macOS App Icon (.icns)
+        run: |
+          ICON_SRC="frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset"
+          ICONSET_DIR="AppIcon.iconset"
+          rm -rf "$ICONSET_DIR"
+          mkdir -p "$ICONSET_DIR"
+          # Copy icon sizes into the iconset directory (sips handles scaling)
+          sips -z 16   16   "$ICON_SRC/app_icon_16.png"   --out "$ICONSET_DIR/icon_16x16.png"   > /dev/null
+          sips -z 32   32   "$ICON_SRC/app_icon_32.png"   --out "$ICONSET_DIR/icon_16x16@2x.png" > /dev/null
+          sips -z 32   32   "$ICON_SRC/app_icon_32.png"   --out "$ICONSET_DIR/icon_32x32.png"   > /dev/null
+          sips -z 64   64   "$ICON_SRC/app_icon_64.png"   --out "$ICONSET_DIR/icon_32x32@2x.png" > /dev/null
+          sips -z 128  128  "$ICON_SRC/app_icon_128.png"  --out "$ICONSET_DIR/icon_128x128.png"  > /dev/null
+          sips -z 256  256  "$ICON_SRC/app_icon_256.png"  --out "$ICONSET_DIR/icon_128x128@2x.png" > /dev/null
+          sips -z 256  256  "$ICON_SRC/app_icon_256.png"  --out "$ICONSET_DIR/icon_256x256.png"  > /dev/null
+          sips -z 512  512  "$ICON_SRC/app_icon_512.png"  --out "$ICONSET_DIR/icon_256x256@2x.png" > /dev/null
+          sips -z 512  512  "$ICON_SRC/app_icon_512.png"  --out "$ICONSET_DIR/icon_512x512.png"  > /dev/null
+          sips -z 1024 1024 "$ICON_SRC/app_icon_1024.png" --out "$ICONSET_DIR/icon_512x512@2x.png" > /dev/null
+          iconutil -c icns "$ICONSET_DIR" -o AppIcon.icns
+          echo "Generated AppIcon.icns successfully"
+          ls -lh AppIcon.icns
+
       - name: Build backend with PyInstaller (Silicon arm64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_workspace" --add-data "web:web" main.py
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole \
+            --name "kivo_workspace" \
+            --add-data "web:web" \
+            --icon "../AppIcon.icns" \
+            main.py
           mv dist/kivo_workspace.app dist/Kivo\ Workspace.app
 
       - name: Re-sign app bundle (Ad-hoc)
@@ -385,10 +418,34 @@ jobs:
           .venv/bin/pip install --prefer-binary -r requirements_ci.txt
           .venv/bin/pip install pyinstaller
 
+      - name: Generate macOS App Icon (.icns)
+        run: |
+          ICON_SRC="frontend/macos/Runner/Assets.xcassets/AppIcon.appiconset"
+          ICONSET_DIR="AppIcon.iconset"
+          rm -rf "$ICONSET_DIR"
+          mkdir -p "$ICONSET_DIR"
+          sips -z 16   16   "$ICON_SRC/app_icon_16.png"   --out "$ICONSET_DIR/icon_16x16.png"   > /dev/null
+          sips -z 32   32   "$ICON_SRC/app_icon_32.png"   --out "$ICONSET_DIR/icon_16x16@2x.png" > /dev/null
+          sips -z 32   32   "$ICON_SRC/app_icon_32.png"   --out "$ICONSET_DIR/icon_32x32.png"   > /dev/null
+          sips -z 64   64   "$ICON_SRC/app_icon_64.png"   --out "$ICONSET_DIR/icon_32x32@2x.png" > /dev/null
+          sips -z 128  128  "$ICON_SRC/app_icon_128.png"  --out "$ICONSET_DIR/icon_128x128.png"  > /dev/null
+          sips -z 256  256  "$ICON_SRC/app_icon_256.png"  --out "$ICONSET_DIR/icon_128x128@2x.png" > /dev/null
+          sips -z 256  256  "$ICON_SRC/app_icon_256.png"  --out "$ICONSET_DIR/icon_256x256.png"  > /dev/null
+          sips -z 512  512  "$ICON_SRC/app_icon_512.png"  --out "$ICONSET_DIR/icon_256x256@2x.png" > /dev/null
+          sips -z 512  512  "$ICON_SRC/app_icon_512.png"  --out "$ICONSET_DIR/icon_512x512.png"  > /dev/null
+          sips -z 1024 1024 "$ICON_SRC/app_icon_1024.png" --out "$ICONSET_DIR/icon_512x512@2x.png" > /dev/null
+          iconutil -c icns "$ICONSET_DIR" -o AppIcon.icns
+          echo "Generated AppIcon.icns successfully"
+          ls -lh AppIcon.icns
+
       - name: Build backend with PyInstaller (Intel x86_64)
         run: |
           cd backend
-          .venv/bin/pyinstaller --noconfirm --onedir --noconsole --name "kivo_workspace" --add-data "web:web" main.py
+          .venv/bin/pyinstaller --noconfirm --onedir --noconsole \
+            --name "kivo_workspace" \
+            --add-data "web:web" \
+            --icon "../AppIcon.icns" \
+            main.py
           mv dist/kivo_workspace.app dist/Kivo\ Workspace.app
 
       - name: Re-sign app bundle (Ad-hoc)

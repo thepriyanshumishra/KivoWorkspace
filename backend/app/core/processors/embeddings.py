@@ -155,9 +155,16 @@ def get_embedding_model():
                 logger.info("Cleaned up temporary FP32 ONNX model file.")
                 
             logger.info("GTE ONNX quantization completed successfully.")
+        except ImportError as import_err:
+            logger.error(
+                f"[Embeddings] Optional packages (torch/sentence_transformers) not available "
+                f"for ONNX auto-conversion: {import_err}. "
+                f"Run the Kivo setup script to install them, or place a pre-built ONNX file at: {quant_onnx_path}"
+            )
+            return None
         except Exception as export_err:
-            logger.error(f"Failed to auto-export GTE model to ONNX: {export_err}")
-            raise RuntimeError(f"GTE model ONNX export failed: {export_err}")
+            logger.error(f"[Embeddings] Failed to auto-export GTE model to ONNX: {export_err}")
+            return None
 
     _model_instance = ONNXEmbeddingModel(str(quant_onnx_path))
     return _model_instance
@@ -220,6 +227,18 @@ class EmbeddingProcessor:
         
         # Get singleton model
         model = get_embedding_model()
+        if model is None:
+            logger.error(
+                "[Embeddings] Embedding model is not available. "
+                "Run the Kivo setup script to download and build the ONNX model first."
+            )
+            return {
+                "source_id": source_id,
+                "chunks_count": 0,
+                "embedding_dim": 0,
+                "cached": False,
+                "error": "Embedding model not available. Run setup to install."
+            }
 
         logger.info(f"Encoding {len(texts)} chunks for source {source_id}...")
         

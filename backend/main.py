@@ -470,25 +470,62 @@ if __name__ == "__main__":
     import webbrowser
     import threading
     import time
+    import multiprocessing
+
+    # CRITICAL: Required on macOS/Windows when frozen by PyInstaller to prevent
+    # the app from infinitely re-spawning child processes on startup.
+    multiprocessing.freeze_support()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--host", type=str, default="127.0.0.1")
     args = parser.parse_args()
 
+    # Find a free port starting from the requested one
+    import socket
+    def _find_free_port(host: str, start_port: int, tries: int = 5) -> int:
+        for port in range(start_port, start_port + tries):
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind((host, port))
+                return port
+            except OSError:
+                logger.warning(f"Port {port} is already in use, trying {port + 1}...")
+        return start_port  # Fall back to original; uvicorn will surface the error
+
+    actual_port = _find_free_port(args.host, args.port)
+    if actual_port != args.port:
+        logger.info(f"Port {args.port} was in use. Using port {actual_port} instead.")
+
     # Automatically open the browser when packaged/run in production
     if getattr(sys, "frozen", False):
         def open_browser():
-            time.sleep(1.5)  # Give uvicorn a moment to start
+            time.sleep(2.0)  # Give uvicorn a moment to bind and start
             try:
-                webbrowser.open(f"http://{args.host}:{args.port}")
+                webbrowser.open(f"http://{args.host}:{actual_port}")
             except Exception as e:
                 logger.error(f"Failed to open browser: {e}")
 
         threading.Thread(target=open_browser, daemon=True).start()
 
-    logger.info(f"Starting Kivo Workspace server at http://{args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port)
+    logger.info(f"Starting Kivo Workspace server at http://{args.host}:{actual_port}")
+    try:
+        uvicorn.run(app, host=args.host, port=actual_port)
+    except Exception as fatal:
+        logger.critical(f"Kivo Workspace server failed to start: {fatal}")
+        # On macOS/Windows frozen builds, write crash info to a log file
+        # so the user can diagnose the problem.
+        if getattr(sys, "frozen", False):
+            crash_log = Path.home() / "kivo_crash.log"
+            try:
+                import traceback
+                with open(crash_log, "w") as f:
+                    f.write(f"Kivo Workspace crashed on startup:\n")
+                    traceback.print_exc(file=f)
+                logger.info(f"Crash log written to: {crash_log}")
+            except Exception:
+                pass
+        sys.exit(1)
 
 
 

@@ -51,7 +51,7 @@ jobs:
       - name: Build Flutter Web App
         run: |
           cd frontend
-          flutter build web --release --web-renderer canvaskit
+          flutter build web --release
 
       - name: Upload Web Assets Artifact
         uses: actions/upload-artifact@v4
@@ -347,6 +347,13 @@ jobs:
         run: |
           rm -rf backend/build backend/dist backend/web macos_intel_app.zip
 
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'backend/requirements_ci.txt'
+
       - name: Download Web Assets Artifact
         uses: actions/download-artifact@v4
         with:
@@ -426,7 +433,7 @@ jobs:
           cp -R silicon/Kivo\ Workspace.app Kivo\ Workspace.app
           
           # Find all Mach-O files in Silicon app and merge with Intel counterpart
-          find "Kivo Workspace.app" -type f | while read -r file; do
+          find "Kivo Workspace.app" -type f -print0 | while IFS= read -r -d '' file; do
             rel_path="${file#Kivo Workspace.app/}"
             intel_file="intel/Kivo Workspace.app/$rel_path"
             if [ -f "$intel_file" ]; then

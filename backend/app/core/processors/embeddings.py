@@ -107,64 +107,84 @@ def get_embedding_model():
     quant_onnx_path = models_dir / "gte_multilingual_base_quantized.onnx"
 
     if not quant_onnx_path.exists():
-        logger.info("Quantized GTE ONNX model not found. Starting automatic conversion...")
+        logger.info("Quantized GTE ONNX model not found. Attempting to download pre-compiled model...")
+        download_url = "https://huggingface.co/onnx-community/gte-multilingual-base/resolve/main/onnx/model_quantized.onnx"
+        download_success = False
         try:
-            import torch
-            from sentence_transformers import SentenceTransformer
-            from onnxruntime.quantization import quantize_dynamic, QuantType
-            
-            temp_onnx_path = models_dir / "gte_multilingual_base_temp.onnx"
-            
-            logger.info("Loading PyTorch model on CPU for tracing...")
-            model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code=True, device="cpu")
-            auto_model = model[0].auto_model
-            tokenizer = model[0].tokenizer
-            auto_model.eval()
-            
-            # Trace with dummy input
-            text = "This is a test sentence for ONNX export."
-            inputs = tokenizer(text, return_tensors="pt")
-            
-            logger.info("Exporting to FP32 ONNX graph...")
-            with torch.no_grad():
-                torch.onnx.export(
-                    auto_model,
-                    (inputs["input_ids"].cpu(), inputs["attention_mask"].cpu()),
-                    str(temp_onnx_path),
-                    input_names=["input_ids", "attention_mask"],
-                    output_names=["last_hidden_state"],
-                    dynamic_axes={
-                        "input_ids": {0: "batch_size", 1: "sequence_length"},
-                        "attention_mask": {0: "batch_size", 1: "sequence_length"},
-                        "last_hidden_state": {0: "batch_size", 1: "sequence_length"}
-                    },
-                    opset_version=14,
-                    do_constant_folding=True
+            import httpx
+            with httpx.Client(follow_redirects=True, timeout=300.0) as client:
+                logger.info(f"Downloading pre-compiled GTE ONNX model from: {download_url}")
+                temp_download_path = quant_onnx_path.with_suffix(".tmp")
+                with open(temp_download_path, "wb") as f:
+                    with client.stream("GET", download_url) as response:
+                        response.raise_for_status()
+                        for chunk in response.iter_bytes(chunk_size=8192):
+                            f.write(chunk)
+                temp_download_path.rename(quant_onnx_path)
+                logger.info("GTE ONNX model downloaded and saved successfully.")
+                download_success = True
+        except Exception as dl_err:
+            logger.warning(f"Failed to download pre-compiled GTE model: {dl_err}. Falling back to local conversion...")
+
+        if not download_success:
+            logger.info("Starting local automatic conversion...")
+            try:
+                import torch
+                from sentence_transformers import SentenceTransformer
+                from onnxruntime.quantization import quantize_dynamic, QuantType
+                
+                temp_onnx_path = models_dir / "gte_multilingual_base_temp.onnx"
+                
+                logger.info("Loading PyTorch model on CPU for tracing...")
+                model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code=True, device="cpu")
+                auto_model = model[0].auto_model
+                tokenizer = model[0].tokenizer
+                auto_model.eval()
+                
+                # Trace with dummy input
+                text = "This is a test sentence for ONNX export."
+                inputs = tokenizer(text, return_tensors="pt")
+                
+                logger.info("Exporting to FP32 ONNX graph...")
+                with torch.no_grad():
+                    torch.onnx.export(
+                        auto_model,
+                        (inputs["input_ids"].cpu(), inputs["attention_mask"].cpu()),
+                        str(temp_onnx_path),
+                        input_names=["input_ids", "attention_mask"],
+                        output_names=["last_hidden_state"],
+                        dynamic_axes={
+                            "input_ids": {0: "batch_size", 1: "sequence_length"},
+                            "attention_mask": {0: "batch_size", 1: "sequence_length"},
+                            "last_hidden_state": {0: "batch_size", 1: "sequence_length"}
+                        },
+                        opset_version=14,
+                        do_constant_folding=True
+                    )
+                    
+                logger.info("Quantizing ONNX model to INT8...")
+                quantize_dynamic(
+                    model_input=str(temp_onnx_path),
+                    model_output=str(quant_onnx_path),
+                    weight_type=QuantType.QInt8
                 )
                 
-            logger.info("Quantizing ONNX model to INT8...")
-            quantize_dynamic(
-                model_input=str(temp_onnx_path),
-                model_output=str(quant_onnx_path),
-                weight_type=QuantType.QInt8
-            )
-            
-            # Clean up the large temp FP32 file
-            if temp_onnx_path.exists():
-                temp_onnx_path.unlink()
-                logger.info("Cleaned up temporary FP32 ONNX model file.")
-                
-            logger.info("GTE ONNX quantization completed successfully.")
-        except ImportError as import_err:
-            logger.error(
-                f"[Embeddings] Optional packages (torch/sentence_transformers) not available "
-                f"for ONNX auto-conversion: {import_err}. "
-                f"Run the Kivo setup script to install them, or place a pre-built ONNX file at: {quant_onnx_path}"
-            )
-            return None
-        except Exception as export_err:
-            logger.error(f"[Embeddings] Failed to auto-export GTE model to ONNX: {export_err}")
-            return None
+                # Clean up the large temp FP32 file
+                if temp_onnx_path.exists():
+                    temp_onnx_path.unlink()
+                    logger.info("Cleaned up temporary FP32 ONNX model file.")
+                    
+                logger.info("GTE ONNX quantization completed successfully.")
+            except ImportError as import_err:
+                logger.error(
+                    f"[Embeddings] Optional packages (torch/sentence_transformers) not available "
+                    f"for ONNX auto-conversion: {import_err}. "
+                    f"Run the Kivo setup script to install them, or place a pre-built ONNX file at: {quant_onnx_path}"
+                )
+                return None
+            except Exception as export_err:
+                logger.error(f"[Embeddings] Failed to auto-export GTE model to ONNX: {export_err}")
+                return None
 
     _model_instance = ONNXEmbeddingModel(str(quant_onnx_path))
     return _model_instance

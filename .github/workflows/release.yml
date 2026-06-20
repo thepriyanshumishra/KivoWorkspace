@@ -188,22 +188,18 @@ jobs:
           cp -r backend/dist/kivo_workspace/* debian/usr/share/kivoworkspace/
           
           # Create launch script
-          cat << 'EOF' > debian/usr/bin/kivoworkspace
-#!/bin/bash
-exec /usr/share/kivoworkspace/kivo_workspace "$@"
-EOF
+          echo '#!/bin/bash' > debian/usr/bin/kivoworkspace
+          echo 'exec /usr/share/kivoworkspace/kivo_workspace "$@"' >> debian/usr/bin/kivoworkspace
           chmod +x debian/usr/bin/kivoworkspace
           
           # Create control file
-          cat << EOF > debian/DEBIAN/control
-Package: kivoworkspace
-Version: ${{ env.VERSION }}
-Section: utils
-Priority: optional
-Architecture: amd64
-Maintainer: Priyanshu Mishra <priyanshu@kivo.ai>
-Description: Kivo Workspace Desktop Assistant
-EOF
+          echo "Package: kivoworkspace" > debian/DEBIAN/control
+          echo "Version: ${{ env.VERSION }}" >> debian/DEBIAN/control
+          echo "Section: utils" >> debian/DEBIAN/control
+          echo "Priority: optional" >> debian/DEBIAN/control
+          echo "Architecture: amd64" >> debian/DEBIAN/control
+          echo "Maintainer: Priyanshu Mishra <priyanshu@kivo.ai>" >> debian/DEBIAN/control
+          echo "Description: Kivo Workspace Desktop Assistant" >> debian/DEBIAN/control
           
           dpkg-deb --build debian KivoWorkspace-Linux-${{ env.VERSION }}.deb
 
@@ -225,23 +221,19 @@ EOF
           cp -r backend/dist/kivo_workspace/* AppDir/usr/bin/
           
           # Create AppRun entrypoint
-          cat << 'EOF' > AppDir/AppRun
-#!/bin/sh
-SELF=$(readlink -f "$0")
-HERE=$(dirname "$SELF")
-exec "$HERE/usr/bin/kivo_workspace" "$@"
-EOF
+          echo '#!/bin/sh' > AppDir/AppRun
+          echo 'SELF=$(readlink -f "$0")' >> AppDir/AppRun
+          echo 'HERE=$(dirname "$SELF")' >> AppDir/AppRun
+          echo 'exec "$HERE/usr/bin/kivo_workspace" "$@"' >> AppDir/AppRun
           chmod +x AppDir/AppRun
           
           # Create Desktop file
-          cat << 'EOF' > AppDir/kivoworkspace.desktop
-[Desktop Entry]
-Name=Kivo Workspace
-Exec=kivo_workspace
-Icon=kivoworkspace
-Type=Application
-Categories=Utility;
-EOF
+          echo '[Desktop Entry]' > AppDir/kivoworkspace.desktop
+          echo 'Name=Kivo Workspace' >> AppDir/kivoworkspace.desktop
+          echo 'Exec=kivo_workspace' >> AppDir/kivoworkspace.desktop
+          echo 'Icon=kivoworkspace' >> AppDir/kivoworkspace.desktop
+          echo 'Type=Application' >> AppDir/kivoworkspace.desktop
+          echo 'Categories=Utility;' >> AppDir/kivoworkspace.desktop
           
           # Use favicon or dummy logo for icon
           cp backend/web/favicon.png AppDir/kivoworkspace.png || touch AppDir/kivoworkspace.png

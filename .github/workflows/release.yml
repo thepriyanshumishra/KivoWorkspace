@@ -113,6 +113,7 @@ jobs:
             --name "KivoWorkspace" `
             --add-data "web;web" `
             --icon "..\frontend\windows\runner\resources\app_icon.ico" `
+            --collect-all transformers `
             main.py
 
       - name: Rename executable
@@ -182,6 +183,7 @@ jobs:
           .venv/bin/pyinstaller --noconfirm --onedir --noconsole \
             --name "kivo_workspace" \
             --add-data "web:web" \
+            --collect-all transformers \
             main.py
 
       - name: Package Debian (.deb)
@@ -338,6 +340,7 @@ jobs:
             --name "Kivo Workspace" \
             --add-data "web:web" \
             --icon "../AppIcon.icns" \
+            --collect-all transformers \
             main.py
 
       - name: Re-sign app bundle (Ad-hoc)
@@ -444,6 +447,7 @@ jobs:
             --name "Kivo Workspace" \
             --add-data "web:web" \
             --icon "../AppIcon.icns" \
+            --collect-all transformers \
             main.py
 
       - name: Re-sign app bundle (Ad-hoc)

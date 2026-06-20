@@ -258,7 +258,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================
-  # JOB 3 · macOS Silicon → Build & Zip Bundle (arm64)
+  # JOB 3 · macOS Silicon → Build & Upload DMG (arm64)
   # ============================================================
   build-macos-silicon:
     name: macOS Silicon Build
@@ -312,7 +312,27 @@ jobs:
         run: |
           codesign --force --deep --sign - "backend/dist/Kivo Workspace.app"
 
-      - name: Zip Bundle (Preserving symlinks/permissions)
+      - name: Create DMG - macOS Silicon
+        run: |
+          rm -rf staging_silicon KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
+          mkdir -p staging_silicon
+          cp -R backend/dist/Kivo\ Workspace.app staging_silicon/Kivo\ Workspace.app
+          ln -s /Applications staging_silicon/Applications
+          hdiutil create -fs HFS+ -srcfolder staging_silicon -volname "Kivo Workspace Silicon" -format UDZO KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
+          rm -rf staging_silicon
+
+      - name: Upload Silicon DMG to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Zip Bundle (Preserving symlinks/permissions for Universal merge)
         run: |
           cd backend/dist
           zip -q -r -y ../../macos_silicon_app.zip "Kivo Workspace.app"
@@ -325,7 +345,7 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # JOB 4 · macOS Intel → Build & Zip Bundle (x86_64 Self-Hosted)
+  # JOB 4 · macOS Intel → Build & Upload DMG (x86_64 Self-Hosted)
   # ============================================================
   build-macos-intel:
     name: macOS Intel Build (Self-Hosted)
@@ -375,7 +395,27 @@ jobs:
         run: |
           codesign --force --deep --sign - "backend/dist/Kivo Workspace.app"
 
-      - name: Zip Bundle (Preserving symlinks/permissions)
+      - name: Create DMG - macOS Intel
+        run: |
+          rm -rf staging_intel KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
+          mkdir -p staging_intel
+          cp -R backend/dist/Kivo\ Workspace.app staging_intel/Kivo\ Workspace.app
+          ln -s /Applications staging_intel/Applications
+          hdiutil create -fs HFS+ -srcfolder staging_intel -volname "Kivo Workspace Intel" -format UDZO KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
+          rm -rf staging_intel
+
+      - name: Upload Intel DMG to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Zip Bundle (Preserving symlinks/permissions for Universal merge)
         run: |
           cd backend/dist
           zip -q -r -y ../../macos_intel_app.zip "Kivo Workspace.app"
@@ -388,7 +428,7 @@ jobs:
           retention-days: 1
 
   # ============================================================
-  # JOB 5 · macOS Merge & Pack → Intel, Silicon, Universal DMGs
+  # JOB 5 · macOS Merge & Pack → Universal DMG
   # ============================================================
   pack-macos:
     name: macOS Packaging & Universal Merge
@@ -445,27 +485,7 @@ jobs:
 
       - name: Re-sign App Bundles (Ad-hoc)
         run: |
-          codesign --force --deep --sign - "silicon/Kivo Workspace.app"
-          codesign --force --deep --sign - "intel/Kivo Workspace.app"
           codesign --force --deep --sign - "Kivo Workspace.app"
-
-      - name: Create DMG - macOS Intel
-        run: |
-          rm -rf staging_intel KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
-          mkdir -p staging_intel
-          cp -R intel/Kivo\ Workspace.app staging_intel/Kivo\ Workspace.app
-          ln -s /Applications staging_intel/Applications
-          hdiutil create -fs HFS+ -srcfolder staging_intel -volname "Kivo Workspace Intel" -format UDZO KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
-          rm -rf staging_intel
-
-      - name: Create DMG - macOS Silicon
-        run: |
-          rm -rf staging_silicon KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
-          mkdir -p staging_silicon
-          cp -R silicon/Kivo\ Workspace.app staging_silicon/Kivo\ Workspace.app
-          ln -s /Applications staging_silicon/Applications
-          hdiutil create -fs HFS+ -srcfolder staging_silicon -volname "Kivo Workspace Silicon" -format UDZO KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
-          rm -rf staging_silicon
 
       - name: Create DMG - macOS Universal
         run: |
@@ -483,9 +503,6 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: |
-            KivoWorkspace-macOS-Intel-${{ env.VERSION }}.dmg
-            KivoWorkspace-macOS-Silicon-${{ env.VERSION }}.dmg
-            KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
+          files: KivoWorkspace-macOS-Universal-${{ env.VERSION }}.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
